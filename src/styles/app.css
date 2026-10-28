@@ -1307,3 +1307,26 @@ button.cell.shot,
     opacity: 0;
   }
 }
+
+/* ---------- landscape phone ---------- */
+@media (orientation: landscape) and (max-height: 500px) {
+  :root {
+    --cell: clamp(18px, calc((100dvh - 120px) / 10), 34px);
+  }
+  .top {
+    height: 44px;
+    margin-bottom: 8px;
+  }
+  .battle {
+    grid-template-columns: auto auto 1fr;
+    grid-template-areas:
+      'target own strip'
+      'target own actions'
+      'target yours theirs'
+      'stall stall stall';
+    gap: 8px 16px;
+  }
+  .a-own .board.mini {
+    --c: calc(var(--cell) * 0.7);
+  }
+}

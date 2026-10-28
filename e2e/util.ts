@@ -7,8 +7,12 @@ export const fleetCells = (f: Fleet): number[] => f.flatMap((s, i) => Array.from
 export async function player(browser: Browser, opts: BrowserContextOptions = {}): Promise<Page> {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, ...opts });
   await ctx.addInitScript(() => {
-    localStorage.setItem('bs:debug', '1');
-    localStorage.setItem('bs:mute', '1');
+    try {
+      localStorage.setItem('bs:debug', '1');
+      localStorage.setItem('bs:mute', '1');
+    } catch {
+      /* about:blank */
+    }
   });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => console.log('[pageerror]', e.message));

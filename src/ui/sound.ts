@@ -3,12 +3,19 @@ import type { Sfx } from '../app/controller';
 const KEY = 'bs:mute';
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
-let muted = localStorage.getItem(KEY) === '1';
+const store = (): Storage | null => {
+  try {
+    return localStorage;
+  } catch {
+    return null;
+  }
+};
+let muted = store()?.getItem(KEY) === '1';
 
 export const isMuted = (): boolean => muted;
 export function setMuted(m: boolean): void {
   muted = m;
-  localStorage.setItem(KEY, m ? '1' : '0');
+  store()?.setItem(KEY, m ? '1' : '0');
 }
 
 /** Create the AudioContext lazily on the first user gesture. */

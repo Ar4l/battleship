@@ -75,7 +75,7 @@ test.describe('direct-link fallback (offline-safe)', () => {
       await targetCell(A, cell).click();
       await expect.poll(() => A.evaluate(() => (window as any).__bs.state().match.phase)).toBe('theirTurn');
       if (name === 'Sonar') await expect(A.locator('#strip')).toContainText('Sonar: 2 ship cells');
-      if (name === 'Torpedo') await expect(A.locator('#strip')).toContainText('J5 hit');
+      if (name === 'Torpedo') await expect(A.locator('#strip')).toContainText('J5: hit');
       if (name === 'Line strike') await expect(A.locator('#strip')).toContainText('You sank their Cruiser');
       await targetCell(B, bWater++).click();
     }
