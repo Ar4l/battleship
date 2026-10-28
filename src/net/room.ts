@@ -1,16 +1,18 @@
 /**
- * All Trystero usage lives here. Trystero (Nostr strategy) only does
+ * All Trystero usage lives here. Trystero (torrent strategy) only does
  * matchmaking and SDP signalling; the game runs over our own negotiated
  * data channel on the peer connection it sets up.
  */
 import { STUN, fromChannel, gameChannel, type Transport } from './transport';
 
 export const APP_ID = 'aral.cc-battleship';
+/** Live WebTorrent trackers (tracker.btorrent.xyz from the defaults is dead). */
+const TRACKERS = ['open.ftorrent.com', 'tracker.webtorrent.dev', 'tracker.openwebtorrent.com', 'tracker.files.fm:7073/announce'].map((u) => 'wss://' + u);
 
-type Trystero = typeof import('trystero');
+type Trystero = typeof import('@trystero-p2p/torrent');
 let lib: Promise<Trystero> | null = null;
 /** Start downloading the Trystero chunk (idempotent). */
-export const prefetch = (): Promise<Trystero> => (lib ??= import('trystero'));
+export const prefetch = (): Promise<Trystero> => (lib ??= import('@trystero-p2p/torrent'));
 
 export interface RoomEvents {
   transport(t: Transport): void;
@@ -59,7 +61,7 @@ export function openRoom(role: 'host' | 'guest', code: number, ev: RoomEvents): 
     const T = await prefetch();
     if (left) return;
     const r = T.joinRoom(
-      { appId: APP_ID, relayConfig: { warnOnRelayFailure: false }, rtcConfig: { iceServers: STUN } },
+      { appId: APP_ID, relayConfig: { urls: TRACKERS, warnOnRelayFailure: false }, rtcConfig: { iceServers: STUN } },
       'r' + c,
       {
         handshakeTimeoutMs: 10000,

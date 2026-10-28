@@ -54,8 +54,8 @@ export class Controller {
   private stopForward: (() => void) | null = null;
   private gameNo = 0;
   private hostStartedLast = false;
-  private salt = new Uint8Array(16);
-  private nonce = new Uint8Array(16);
+  private salt: Uint8Array = new Uint8Array(16);
+  private nonce: Uint8Array = new Uint8Array(16);
   private theirBoardCommit: Uint8Array | null = null;
   private theirCoinCommit: Uint8Array | null = null;
   private theirNonce: Uint8Array | null = null;
@@ -531,7 +531,7 @@ export class Controller {
     const text = this.describe(a, true);
     this.lastResult = text;
     this.sfxFor(a);
-    if (s.match.phase === 'over') return this.gameOver(text);
+    if ((s.match.phase as string) === 'over') return this.gameOver(text);
     this.set({ ...s, banner: undefined });
     this.onAnnounce(text + '.');
     this.turnStarted();

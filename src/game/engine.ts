@@ -129,6 +129,8 @@ function applyToBoard(m: Match, board: BoardView, attack: Attack, answer: Answer
     board.last = attack.k === 'item' ? footprint(SONAR, attack.a, 0) : [];
     return;
   }
+  if (attack.k === 'item' && attack.item === TORPEDO)
+    for (const c of cells) if (c !== answer.entries[0]?.cell) board.known.add(c);
   for (const e of answer.entries) {
     if (e.code >= 1) board.hit.add(e.cell);
     if (e.code >= 2 && e.ship) {

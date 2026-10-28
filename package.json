@@ -12,15 +12,16 @@
     "size": "node scripts/size.mjs",
     "check": "tsc --noEmit && vitest run && vite build && node scripts/size.mjs && playwright test"
   },
-  "dependencies": {
-    "trystero": "0.26.0"
-  },
   "devDependencies": {
     "@axe-core/playwright": "^4.14.0",
     "@playwright/test": "^1.64.1",
     "@types/node": "^26.6.5",
+    "terser": "^5.51.2",
     "typescript": "^5.9.3",
     "vite": "^8.3.5",
     "vitest": "^4.1.12"
+  },
+  "dependencies": {
+    "@trystero-p2p/torrent": "0.26.0"
   }
 }
