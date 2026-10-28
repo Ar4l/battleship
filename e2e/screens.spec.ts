@@ -94,6 +94,32 @@ for (const size of SIZES)
       await targetCell(A, 52).hover();
       await targetCell(A, 52).focus();
       await shot(A, `07-battle-items-${tag}`);
+      // Layout and anti-"AI look" checks on the live battle screen.
+      const audit = await A.evaluate(() => {
+        const bad: string[] = [];
+        for (const el of document.querySelectorAll('*')) {
+          const cs = getComputedStyle(el);
+          if (cs.boxShadow !== 'none') bad.push('box-shadow ' + el.className);
+          if (cs.backdropFilter && cs.backdropFilter !== 'none') bad.push('backdrop-filter ' + el.className);
+          if (/gradient/.test(cs.backgroundImage) && !el.closest('.is-sunk')) bad.push('gradient ' + el.className);
+          for (const c of [cs.color, cs.backgroundColor, cs.borderTopColor]) {
+            const m = /rgba?\((\d+), (\d+), (\d+)/.exec(c);
+            if (!m) continue;
+            const [r, g, b] = [+m[1]! / 255, +m[2]! / 255, +m[3]! / 255];
+            const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+            if (!d) continue;
+            const sat = d / (1 - Math.abs(max + min - 1));
+            let hue = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+            hue = (hue * 60 + 360) % 360;
+            if (hue >= 230 && hue <= 300 && sat > 0.3) bad.push(`purple ${c} ${el.className}`);
+          }
+        }
+        const cell = document.querySelector('.a-target .cell')!.getBoundingClientRect();
+        return { bad, scroll: document.documentElement.scrollWidth - innerWidth, cell: cell.width };
+      });
+      expect(audit.bad).toEqual([]);
+      expect(audit.scroll).toBeLessThanOrEqual(0);
+      expect(audit.cell).toBeGreaterThanOrEqual(24);
       await A.keyboard.press('Escape');
       await shot(B, `08-battle-waiting-${tag}`);
       await playOut(A, B, A);

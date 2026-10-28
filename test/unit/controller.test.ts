@@ -124,6 +124,23 @@ describe('controller over an in-memory transport', () => {
     expect(hs.reason).toBe('Cheating detected: they reported a miss at J1 but a ship was there');
   });
 
+  it('turn timer: auto-acts with a random shot (Salvo fills the selection)', async () => {
+    for (const mode of [0, 1] as const) {
+      const { H, G } = await connect({ mode, timer: 15 });
+      await placeAndStart(H, G);
+      const me = H.match!.phase === 'myTurn' ? H : G;
+      expect(me.deadline).toBeGreaterThan(Date.now());
+      if (mode === 1) me.toggleSel(0);
+      me.autoAct();
+      const m = me.match!;
+      expect(m.phase).toBe('awaitingAnswer');
+      await until(() => m.phase !== 'awaitingAnswer');
+      expect(m.target.shot.size).toBe(mode === 1 ? 5 : 1);
+      if (mode === 1) expect(m.target.shot.has(0)).toBe(true);
+      H.leave();
+    }
+  });
+
   it('BYE takes the opponent to "left"', async () => {
     const { H, G } = await connect({});
     await placeAndStart(H, G);

@@ -28,7 +28,7 @@ export default defineConfig({
   base: '/battleship/',
   build: {
     target: 'es2022',
-    modulePreload: { polyfill: false },
+    modulePreload: false,
     cssCodeSplit: false,
     assetsInlineLimit: 0,
   },

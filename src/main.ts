@@ -1,14 +1,33 @@
 import './styles/tokens.css';
 import './styles/app.css';
 import { Controller } from './app/controller';
-import { installDebug } from './app/debug';
-import { createDirectGuest, createDirectHost } from './net/direct';
-import { forwardAnswer, listenForAnswers } from './net/forward';
 import { openRoom, prefetch, randomCode } from './net/room';
 import { mountApp } from './ui/app-view';
 
-const ctrl = new Controller({ openRoom, randomCode, createDirectHost, createDirectGuest, listenForAnswers, forwardAnswer });
-installDebug(ctrl);
+// The direct-link fallback is loaded only when someone needs it.
+const direct = () => import('./net/direct');
+const forward = () => import('./net/forward');
+
+const ctrl = new Controller({
+  openRoom,
+  randomCode,
+  createDirectHost: async () => (await direct()).createDirectHost(),
+  createDirectGuest: async (o) => (await direct()).createDirectGuest(o),
+  listenForAnswers: (cb) => {
+    let stop = () => {};
+    let done = false;
+    void forward().then((f) => !done && (stop = f.listenForAnswers(cb)));
+    return () => ((done = true), stop());
+  },
+  forwardAnswer: async (b) => (await forward()).forwardAnswer(b),
+});
+let debug = false;
+try {
+  debug = localStorage.getItem('bs:debug') === '1';
+} catch {
+  /* storage blocked */
+}
+if (debug) void import('./app/debug').then((d) => d.installDebug(ctrl));
 mountApp(document.getElementById('app')!, ctrl);
 
 function route(): void {

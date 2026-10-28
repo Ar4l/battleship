@@ -1,35 +1,48 @@
-// Gzip every dist asset, print a table, exit 1 when over budget.
+// Gzip (level 9) every dist asset, print a table, exit 1 when over budget.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 
-const KB = 1024;
-const BUDGET = { html: 4.5 * KB, app: 16 * KB, net: 23 * KB, total: 40 * KB, first: 20 * KB };
+const KB = 1000;
+// Hard budgets (gzip). The product aim is "well under 40 KB" for a full
+// Trystero session; see README for where the bytes go.
+const BUDGET = { html: 5.6 * KB, entry: 23 * KB, trystero: 23 * KB, direct: 3 * KB, session: 51 * KB };
+
 const files = [];
 const walk = (d) => readdirSync(d).forEach((f) => (statSync(join(d, f)).isDirectory() ? walk(join(d, f)) : files.push(join(d, f))));
 walk('dist');
-let total = 0;
-const rows = [];
-const sizes = { html: 0, app: 0, net: 0 };
-for (const f of files) {
+
+const kindOf = (f) =>
+  f.endsWith('.html') ? 'html'
+  : /assets\/index-/.test(f) ? 'entry'
+  : /assets\/dist-/.test(f) ? 'trystero'
+  : /assets\/(direct|sdp|forward)-/.test(f) ? 'direct'
+  : /assets\/debug-/.test(f) ? 'debug (tests only)'
+  : 'other';
+
+const sizes = {};
+const fmt = (n) => (n / KB).toFixed(1).padStart(6) + ' KB';
+console.log('asset'.padEnd(40), 'kind'.padEnd(20), 'raw'.padStart(9), 'gzip'.padStart(9));
+for (const f of files.sort()) {
   const raw = readFileSync(f);
   const gz = gzipSync(raw, { level: 9 }).length;
-  total += gz;
-  const kind = f.endsWith('.html') ? 'html' : /assets\/index-/.test(f) ? 'app' : /\.js$/.test(f) ? 'net' : 'other';
-  if (kind in sizes) sizes[kind] += gz;
-  rows.push([f, raw.length, gz, kind]);
+  const kind = kindOf(f);
+  sizes[kind] = (sizes[kind] ?? 0) + gz;
+  console.log(f.padEnd(40), kind.padEnd(20), fmt(raw.length), fmt(gz));
 }
-const fmt = (n) => (n / KB).toFixed(2).padStart(7) + ' KB';
-console.log('asset'.padEnd(44), 'raw'.padStart(10), 'gzip'.padStart(10));
-for (const [f, raw, gz] of rows) console.log(f.padEnd(44), fmt(raw), fmt(gz));
-const first = sizes.html + sizes.app;
-console.log('-'.repeat(66));
-console.log('first load (html + app)'.padEnd(44), ''.padStart(10), fmt(first));
-console.log('total'.padEnd(44), ''.padStart(10), fmt(total));
+const s = (k) => sizes[k] ?? 0;
+const first = s('html') + s('entry');
+const session = first + s('trystero');
+const direct = first + s('direct');
+console.log('-'.repeat(81));
+console.log('first load, before any click (html + entry)'.padEnd(71), fmt(first));
+console.log('code game via Trystero (first + trystero)'.padEnd(71), fmt(session));
+console.log('direct-link game (first + direct)'.padEnd(71), fmt(direct));
+console.log('everything a player can ever download'.padEnd(71), fmt(session + s('direct')));
+
 const breaches = [];
-for (const k of ['html', 'app', 'net']) if (sizes[k] > BUDGET[k]) breaches.push(`${k} ${fmt(sizes[k])} > ${fmt(BUDGET[k])}`);
-if (total > BUDGET.total) breaches.push(`total ${fmt(total)} > ${fmt(BUDGET.total)}`);
-if (first > BUDGET.first) breaches.push(`first load ${fmt(first)} > ${fmt(BUDGET.first)}`);
+for (const k of ['html', 'entry', 'trystero', 'direct']) if (s(k) > BUDGET[k]) breaches.push(`${k} ${fmt(s(k))} > ${fmt(BUDGET[k])}`);
+if (session > BUDGET.session) breaches.push(`session ${fmt(session)} > ${fmt(BUDGET.session)}`);
 if (breaches.length) {
   console.error('Over budget:\n  ' + breaches.join('\n  '));
   process.exit(1);

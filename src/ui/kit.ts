@@ -46,41 +46,17 @@ export function shareBtn(get: () => string, title = 'Battleship'): HTMLButtonEle
 
 export const linkBox = (text: string, id?: string) => h('div', { cls: 'linkbox mono', id, tabindex: 0, 'aria-label': 'Link' }, text);
 
+let segN = 0;
+/** Segmented control built on native radios (keyboard behaviour for free). */
 export function segmented<T extends string | number>(name: string, opts: { v: T; label: string }[], value: T, onChange: (v: T) => void): HTMLElement {
-  const g = h('div', { cls: 'seg', role: 'radiogroup', 'aria-label': name });
-  const render = (cur: T) => {
-    g.replaceChildren(
-      ...opts.map((o) =>
-        h(
-          'button',
-          {
-            type: 'button',
-            role: 'radio',
-            'aria-checked': String(o.v === cur),
-            tabindex: o.v === cur ? 0 : -1,
-            onclick: () => {
-              render(o.v);
-              onChange(o.v);
-              (g.querySelector('[aria-checked="true"]') as HTMLElement | null)?.focus();
-            },
-            onkeydown: (e: KeyboardEvent) => {
-              const i = opts.findIndex((x) => x.v === cur);
-              const d = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
-              if (!d) return;
-              e.preventDefault();
-              const n = opts[(i + d + opts.length) % opts.length]!;
-              render(n.v);
-              onChange(n.v);
-              (g.querySelector('[aria-checked="true"]') as HTMLElement | null)?.focus();
-            },
-          },
-          o.label,
-        ),
-      ),
-    );
-  };
-  render(value);
-  return g;
+  const group = 'seg' + ++segN;
+  return h(
+    'div',
+    { cls: 'seg', role: 'radiogroup', 'aria-label': name },
+    opts.map((o) =>
+      h('label', null, h('input', { type: 'radio', name: group, checked: o.v === value, onchange: () => onChange(o.v) }), h('span', null, o.label)),
+    ),
+  );
 }
 
 export function toggle(text: string, checked: boolean, onChange: (v: boolean) => void, disabled = false): HTMLElement {

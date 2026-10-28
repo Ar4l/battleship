@@ -2,15 +2,8 @@ import { packSdp } from '../proto/sdp';
 import { seededRng, randomFleet } from '../game/random';
 import type { Controller, Lie } from './controller';
 
-/** window.__bs hooks for e2e, only when localStorage 'bs:debug' === '1'. */
+/** window.__bs hooks for e2e. main.ts loads this only when localStorage 'bs:debug' === '1'. */
 export function installDebug(ctrl: Controller): void {
-  let on = false;
-  try {
-    on = localStorage.getItem('bs:debug') === '1';
-  } catch {
-    /* storage blocked */
-  }
-  if (!on) return;
   const fp = Array.from({ length: 32 }, (_, i) => (i + 16).toString(16).toUpperCase()).join(':');
   (window as unknown as { __bs: unknown }).__bs = {
     ctrl,
