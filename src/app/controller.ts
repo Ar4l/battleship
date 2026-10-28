@@ -427,7 +427,7 @@ export class Controller {
     if (parts.length) return parts.join('. ');
     if (!entries.entries.length) return mine ? 'Torpedo ran clean' : 'Their torpedo ran clean';
     const hits = entries.entries.filter((e) => e.code).map((e) => cellName(e.cell));
-    if (entries.entries.length === 1) return `${mine ? '' : 'They fired at '}${cellName(entries.entries[0]!.cell)} ${hits.length ? 'hit' : 'miss'}`.replace(/^./, (c) => c.toUpperCase());
+    if (entries.entries.length === 1) return `${mine ? 'You fired at ' : 'They fired at '}${cellName(entries.entries[0]!.cell)}: ${hits.length ? 'hit' : 'miss'}`;
     return hits.length ? `${hits.length} hit${hits.length > 1 ? 's' : ''}: ${hits.join(' ')}` : 'All miss';
   }
 

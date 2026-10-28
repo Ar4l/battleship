@@ -17,7 +17,7 @@ export function directHost(ctrl: Controller): Screen {
     if (s.blob && built !== s.blob) {
       built = s.blob;
       const url = gameUrl('o=' + s.blob);
-      paste = h('input', { id: 'paste', cls: 'mono input', placeholder: 'Paste reply link or code', autocomplete: 'off', 'aria-label': 'Reply link or code' });
+      paste = h('input', { id: 'paste', cls: 'mono input', placeholder: 'Paste reply', autocomplete: 'off', 'aria-label': 'Reply link or code' });
       err = h('p', { cls: 'small error', role: 'alert' });
       status = h('p', { cls: 'small muted' });
       const connect = () => paste!.value.trim() && ctrl.pasteAnswer(paste!.value);
@@ -69,7 +69,7 @@ export function directGuest(ctrl: Controller): Screen {
           h('div', { cls: 'linkbox mono small', id: 'answer-code', tabindex: 0, 'aria-label': 'Reply code' }, s.blob),
           copyBtn(() => s.blob!, 'Copy code'),
         ),
-        step(2, 'Waiting for your friend to connect…', h('p', { cls: 'status-line' }, h('span', { cls: 'blink', 'aria-hidden': 'true' }), 'Waiting')),
+        step(2, 'Your friend opens it', h('p', { cls: 'status-line' }, h('span', { cls: 'blink', 'aria-hidden': 'true' }), 'Waiting for your friend to connect…')),
       ),
       btn('Cancel', () => ctrl.leave(), { quiet: true }),
     );

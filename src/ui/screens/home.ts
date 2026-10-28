@@ -19,7 +19,7 @@ export function mark(): SVGElement {
 export function home(ctrl: Controller, prefill = ''): Screen {
   const input = h('input', {
     id: 'code',
-    cls: 'code-input mono',
+    cls: 'code-input',
     inputmode: 'numeric',
     pattern: '\\d{4}',
     maxlength: 4,
@@ -36,14 +36,21 @@ export function home(ctrl: Controller, prefill = ''): Screen {
     }
     ctrl.joinCode(+v);
   };
+  const boxes = [0, 1, 2, 3].map(() => h('span'));
+  const paint = () => boxes.forEach((b, i) => {
+    b.textContent = input.value[i] ?? '';
+    b.className = i === Math.min(input.value.length, 3) ? 'at' : '';
+  });
   input.addEventListener('input', () => {
     const v = input.value.replace(/\D/g, '').slice(0, 4);
     if (v !== input.value) input.value = v;
+    paint();
     err.textContent = '';
     if (v.length) void prefetch();
     if (v.length === 4) submit();
   });
   input.addEventListener('keydown', (e) => e.key === 'Enter' && submit());
+  paint();
   const create = btn('Create game', () => ctrl.createGame(), { primary: true, cls: 'wide', id: 'create' });
   for (const ev of ['pointerenter', 'touchstart', 'focus']) create.addEventListener(ev, () => void prefetch(), { once: true, passive: true });
 
@@ -57,7 +64,7 @@ export function home(ctrl: Controller, prefill = ''): Screen {
       h('p', { cls: 'lede muted' }, 'Two players. Peer-to-peer. No sign-up.'),
       create,
       h('div', { cls: 'divider label' }, h('span', null, 'Or join with a code')),
-      h('div', { cls: 'join' }, input, btn('Join', submit, { id: 'join' })),
+      h('div', { cls: 'join' }, h('div', { cls: 'code mono' }, input, h('div', { cls: 'boxes', 'aria-hidden': 'true' }, boxes)), btn('Join', submit, { id: 'join' })),
       err,
     ),
     h('aside', { cls: 'home-art', 'aria-hidden': 'true' }, chart()),

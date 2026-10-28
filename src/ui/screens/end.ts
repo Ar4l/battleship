@@ -17,9 +17,9 @@ export function end(ctrl: Controller): Screen {
     'section',
     { cls: 'screen end' },
     head,
+    actions,
     h('div', { cls: 'end-boards' }, h('div', null, h('div', { cls: 'cap-label label' }, 'Their waters'), target.el), h('div', { cls: 'end-own' }, h('div', { cls: 'cap-label label' }, 'Your fleet'), own.el)),
     stats,
-    actions,
   );
   let lastKey = '';
   const render = () => {

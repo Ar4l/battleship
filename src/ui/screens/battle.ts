@@ -52,7 +52,7 @@ export function targetModel(m: Match, o: { sel?: number[]; preview?: Set<number>
     labels.push(`${cellName(c)}, ${stateWord(b, c)}${o.sel?.includes(c) ? ', selected' : ''}`);
   }
   let ov = '';
-  if (o.reveal) o.reveal.forEach((s, i) => (ov += capsule(s, FLEET[i]!, 'reveal')));
+  if (o.reveal) o.reveal.forEach((s, i) => !b.sunk[i] && (ov += capsule(s, FLEET[i]!, 'reveal')));
   ov += marks(b, o.anim ?? [], true);
   return { cls, labels, overlay: ov };
 }
@@ -309,7 +309,7 @@ export function battle(ctrl: Controller): Screen {
       armed = null;
     }
     strip.classList.toggle('mine', my);
-    stripText.textContent = s.banner ?? (my ? 'Your turn' : mm.phase === 'awaitingAnswer' ? 'Firing…' : 'Waiting for opponent');
+    stripText.textContent = s.banner ?? (my ? 'Your turn' : mm.phase === 'awaitingAnswer' ? 'Firing…' : 'Their turn');
     stripSub.textContent = s.banner ? '' : ctrl.lastResult;
     let preview: Set<number> | undefined;
     if (item !== null && hover !== null) {
@@ -322,8 +322,8 @@ export function battle(ctrl: Controller): Screen {
     own.update(ownModel(mm, ctrl.fx.own));
     ctrl.fx = { target: [], own: [] };
     renderActions(mm);
-    theirs.replaceChildren(fleetList('Their fleet', mm.target, null));
-    yours.replaceChildren(fleetList('Your fleet', mm.own, mm.fleet));
+    theirs.replaceChildren(fleetList('Enemy ships', mm.target, null));
+    yours.replaceChildren(fleetList('Your ships', mm.own, mm.fleet));
     stall.replaceChildren(
       s.stalled ? h('div', { cls: 'callout' }, h('p', null, "Opponent isn't responding."), btn('Leave', () => ctrl.leaveStalled(), { primary: true })) : '',
     );
