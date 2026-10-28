@@ -285,7 +285,9 @@ export class Controller {
     if (this.gameNo === 1) {
       if (!this.sentCoin) this.send({ t: 'coin', nonce: this.nonce });
       this.sentCoin = true;
-      if (!this.theirNonce) return;
+      // A peer that sends READY but never reveals its coin would stall us here.
+      if (!this.theirNonce) return this.timer('coin', 10000, () => this.state.s === 'placement' && this.notice('invalid-move'));
+      this.timer('coin');
       hostFirst = host ? hostStarts(this.nonce, this.theirNonce) : hostStarts(this.theirNonce, this.nonce);
     }
     this.hostStartedLast = hostFirst;

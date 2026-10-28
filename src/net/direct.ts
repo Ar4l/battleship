@@ -3,10 +3,10 @@ import { packSdp, unpackSdp } from '../proto/sdp';
 import { forwardAnswer, listenForAnswers } from './forward';
 import { STUN, fromChannel, gameChannel, type Transport } from './transport';
 
-export class DirectError extends Error {}
+class DirectError extends Error {}
 
 /** Resolve when gathering completes, 250 ms after the first srflx, or after 3.5 s. */
-export function gather(pc: RTCPeerConnection, capMs = 3500): Promise<void> {
+function gather(pc: RTCPeerConnection, capMs = 3500): Promise<void> {
   return new Promise((res) => {
     if (pc.iceGatheringState === 'complete') return res();
     let settle = 0;
@@ -23,11 +23,6 @@ export function gather(pc: RTCPeerConnection, capMs = 3500): Promise<void> {
     });
   });
 }
-
-/** Debug hook: swap candidates for an unreachable address. */
-export const testHooks = { unreachable: false };
-const mangle = (sdp: string) =>
-  testHooks.unreachable ? sdp.replace(/a=candidate:.*\r\n/g, '') + 'a=candidate:1 1 udp 2130706431 192.0.2.1 9 typ host\r\n' : sdp;
 
 function openOrFail(pc: RTCPeerConnection, dc: RTCDataChannel): { open: Promise<Transport>; arm: (ms: number) => void } {
   let timer = 0;
@@ -62,19 +57,19 @@ export interface DirectHost {
   close(): void;
 }
 
-export const blobFrom = (s: string): string => {
+const blobFrom = (s: string): string => {
   const m = /[#&]a=([A-Za-z0-9_-]+)/.exec(s) ?? /[#&]o=([A-Za-z0-9_-]+)/.exec(s);
   return (m ? m[1]! : s).trim();
 };
 
-export async function createDirectHost(): Promise<DirectHost> {
-  const pc = new RTCPeerConnection({ iceServers: testHooks.unreachable ? [] : STUN });
+async function createDirectHost(): Promise<DirectHost> {
+  const pc = new RTCPeerConnection({ iceServers: STUN });
   const dc = gameChannel(pc);
   const { open, arm } = openOrFail(pc, dc);
   open.catch(() => {});
   await pc.setLocalDescription(await pc.createOffer());
   await gather(pc);
-  const blob = packSdp(mangle(pc.localDescription!.sdp), 'offer');
+  const blob = packSdp(pc.localDescription!.sdp, 'offer');
   if (!blob) throw new DirectError('pack');
   let accepted = false;
   return {
@@ -100,10 +95,10 @@ export interface DirectGuest {
 }
 
 /** Returns null for a malformed offer. */
-export async function createDirectGuest(offer: string): Promise<DirectGuest | null> {
+async function createDirectGuest(offer: string): Promise<DirectGuest | null> {
   const desc = unpackSdp(blobFrom(offer));
   if (!desc || desc.type !== 'offer') return null;
-  const pc = new RTCPeerConnection({ iceServers: testHooks.unreachable ? [] : STUN });
+  const pc = new RTCPeerConnection({ iceServers: STUN });
   const dc = gameChannel(pc);
   const { open, arm } = openOrFail(pc, dc);
   open.catch(() => {});
@@ -114,7 +109,7 @@ export async function createDirectGuest(offer: string): Promise<DirectGuest | nu
   await pc.setRemoteDescription(desc);
   await pc.setLocalDescription(await pc.createAnswer());
   await gather(pc);
-  const blob = packSdp(mangle(pc.localDescription!.sdp), 'answer');
+  const blob = packSdp(pc.localDescription!.sdp, 'answer');
   if (!blob) return null;
   return { blob, transport: open, close: () => pc.close() };
 }

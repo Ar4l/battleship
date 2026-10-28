@@ -1,5 +1,9 @@
-import { expect, test, type Page } from '@playwright/test';
+import { execSync } from 'node:child_process';
+import { chromium, expect, test, type Page } from '@playwright/test';
 import { player, readyBoth, targetCell, waitTurn } from './util';
+
+// Traces of the three-context test here raced into ENOENT; these tests need none.
+test.use({ trace: 'off' });
 
 /** Count this page's WebSockets that are still connecting or open (tracker sockets). */
 const trackSockets = (p: Page) =>
@@ -100,5 +104,42 @@ test.describe('@net Trystero matchmaking', () => {
     await B.goto('./#' + code);
     await expect(A.locator('.placement')).toBeVisible({ timeout: 30000 });
     await expect(B.locator('.placement')).toBeVisible({ timeout: 30000 });
+  });
+
+  test('a guest frozen for 13 s (phone app switch) keeps the game', async ({ browser }) => {
+    test.skip(process.platform !== 'linux', 'freezes the guest browser with SIGSTOP');
+    test.setTimeout(90_000);
+    // The guest runs in its own browser so its processes can be stopped without touching the host.
+    const server = await chromium.launchServer({ args: ['--disable-features=WebRtcHideLocalIpsWithMdns'] });
+    try {
+      const A = await player(browser);
+      const B = await player(await chromium.connect(server.wsEndpoint()));
+      await A.goto('./');
+      await A.click('#create');
+      const code = (await A.locator('#room-code').textContent())!;
+      await B.goto('./#' + code);
+      await expect(A.locator('.placement')).toBeVisible({ timeout: 30000 });
+      await expect(B.locator('.placement')).toBeVisible({ timeout: 30000 });
+      const pid = server.process().pid!;
+      const tree = execSync('ps -eo pid=,ppid=').toString().trim().split('\n').map((l) => l.trim().split(/\s+/).map(Number));
+      const all = [pid];
+      for (let i = 0; i < all.length; i++) for (const [c, pp] of tree) if (pp === all[i]) all.push(c!);
+      const pids = all.join(' ');
+      // Stock Trystero dropped the peer 5 s after 'disconnected' (about 11 s in all),
+      // Chromium itself declares ICE failed at about 16 s.
+      execSync(`kill -STOP ${pids}`);
+      try {
+        await A.waitForTimeout(13_000);
+        await expect(A.locator('.placement')).toBeVisible({ timeout: 100 });
+      } finally {
+        execSync(`kill -CONT ${pids}`);
+      }
+      await A.waitForTimeout(3000);
+      await expect(A.locator('.placement')).toBeVisible();
+      await expect(B.locator('.placement')).toBeVisible();
+      await readyBoth(A, B);
+    } finally {
+      await server.close();
+    }
   });
 });

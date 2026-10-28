@@ -328,6 +328,7 @@ input {
   gap: 16px;
   align-content: start;
   justify-items: start;
+  grid-template-columns: minmax(0, 1fr);
 }
 .settings {
   gap: 20px;
@@ -378,7 +379,7 @@ input {
 }
 .wordmark {
   gap: 14px;
-  font-size: 32px;
+  font-size: min(32px, 9vw);
   line-height: 1;
   margin-bottom: 4px;
 }
@@ -406,9 +407,13 @@ input {
   gap: 8px;
   width: 100%;
 }
+.join .btn {
+  height: auto;
+}
 .code {
   position: relative;
   flex: 1;
+  min-width: 0;
   max-width: 248px;
   height: 56px;
 }
@@ -567,7 +572,7 @@ input {
 }
 .miss {
   fill: var(--fg);
-  opacity: 0.45;
+  opacity: 0.55;
 }
 .hit {
   fill: var(--signal);
@@ -648,7 +653,7 @@ input {
   list-style: none;
   padding: 0;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 0 16px;
 }
 .dock-ship {
@@ -684,14 +689,6 @@ input {
 .lifted .cap-ship {
   background: none;
   outline: 2px solid var(--fg);
-}
-.hint {
-  display: none;
-}
-@media (pointer: fine) {
-  .hint {
-    display: block;
-  }
 }
 
 /* ---------- battle ---------- */
@@ -977,7 +974,7 @@ input {
 }
 @media (min-width: 900px) {
   :root {
-    --cell: 40px;
+    --cell: clamp(40px, min((100vh - 480px) / 10, (100vw - 360px) / 20), 48px);
     --gutter: 32px;
   }
   .home {

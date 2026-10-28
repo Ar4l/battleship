@@ -151,3 +151,46 @@ for (const size of SIZES)
       });
       await shot(C, `11-notice-failed-${tag}`);
     });
+
+/** Pixels the page scrolls sideways, plus any element poking past the right edge. */
+const overflow = (p: Page) =>
+  p.evaluate(() => {
+    const out = [...document.querySelectorAll('body *')]
+      .filter((e) => e.getBoundingClientRect().right > innerWidth + 0.5)
+      .map((e) => `${e.tagName.toLowerCase()}.${e.className}`)
+      .slice(0, 5);
+    return { scroll: document.documentElement.scrollWidth - innerWidth, out };
+  });
+
+for (const width of [320, 360])
+  test(`no sideways scroll at ${width} px`, async ({ browser }) => {
+    test.setTimeout(90_000);
+    const opts = { viewport: { width, height: 740 }, reducedMotion: 'reduce' as const, hasTouch: true };
+    const A = await player(browser, opts);
+    const B = await player(browser, opts);
+    const fits = async (p: Page, what: string) => expect(await overflow(p), what).toEqual({ scroll: 0, out: [] });
+    await A.goto('./');
+    await fits(A, 'home');
+    await A.click('#create');
+    await A.getByRole('radio', { name: 'Items' }).click();
+    await fits(A, 'lobby');
+    await A.click('#use-direct');
+    await expect(A.locator('#offer-link')).toBeVisible();
+    await fits(A, 'direct host');
+    const offer = (await A.locator('#offer-link').textContent())!;
+    await B.goto('http://' + offer);
+    await expect(B.locator('#answer-code')).toBeVisible({ timeout: 15000 });
+    await fits(B, 'direct guest');
+    await A.fill('#paste', (await B.locator('#answer-code').textContent())!);
+    await A.click('#connect');
+    await expect(A.locator('.placement')).toBeVisible({ timeout: 20000 });
+    await fits(A, 'placement');
+    await A.click('#ready');
+    await B.click('#ready');
+    await expect(A.locator('.battle')).toBeVisible();
+    await A.evaluate(() => ((window as any).__bs.state().match.energy.me = 6));
+    await A.evaluate(() => (window as any).__bs.ctrl.emit());
+    await fits(A, 'battle');
+    await playOut(A, B, A);
+    await fits(A, 'end');
+  });

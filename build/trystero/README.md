@@ -12,6 +12,10 @@ from 22.0 KB to 15.6 KB gzipped. Relative imports resolve against the original m
 - `handshake.mjs` is patched in place (a `transform` in vite.config.ts): no room password is
   set, so the password challenge reduces to our own handshake. The build fails if the
   patched text is not found.
+- `peer.mjs` is patched in place too: `disconnectedCloseDelayMs` goes from 5 s to 25 s, so a
+  briefly backgrounded phone isn't dropped before the game's own 20 s grace (src/net/transport.ts).
+- The build also fails unless `@trystero-p2p/core` is exactly 0.26.0, so an upgrade can't
+  silently pair new modules with these stale copies.
 
 Both peers must run this build: the frame format differs from stock Trystero, so a stock
 client with the same appId fails the handshake (it looks like "no host found").

@@ -227,6 +227,27 @@ describe('controller over an in-memory transport', () => {
     }
   });
 
+  it('a peer that sends READY but never its COIN is stopped after 10 s', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { H, G } = await connect({});
+      const t = (G as unknown as { t: { send(u: Uint8Array): void } }).t;
+      const send = t.send;
+      t.send = (u) => decode(u)?.t === 'coin' || send(u);
+      H.setFleet(FLEET_A);
+      G.setFleet(FLEET_B);
+      await H.ready();
+      await G.ready();
+      await until(() => H.state.s === 'placement' && H.state.ready.them);
+      vi.advanceTimersByTime(9_000);
+      expect(H.state.s).toBe('placement');
+      vi.advanceTimersByTime(1_000);
+      expect(H.state).toMatchObject({ s: 'notice', kind: 'invalid-move' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('rematch: the host changes the mode after the guest already asked', async () => {
     const { H, G } = await connect({ mode: 0 });
     await placeAndStart(H, G);

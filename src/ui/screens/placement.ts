@@ -148,7 +148,7 @@ export function placement(ctrl: Controller): Screen {
     h(
       'div',
       'pl-side',
-      h('p', 'small muted hint', 'Drag ships to move them. Click a ship to rotate it.'),
+      h('p', 'small muted', 'Drag ships to move them. Tap or click a ship to rotate it.'),
       h('ul', { cls: 'dock', 'aria-label': 'Ships' }, dockBtns.map((d) => h('li', null, d))),
       h('div', 'row-btns', randomize, rot),
       ready,

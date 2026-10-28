@@ -18,8 +18,8 @@ export const ITEMS: readonly ItemDef[] = [
 export const ENERGY_CAP = 6;
 export const SONAR = 0;
 export const TORPEDO = 1;
-export const CROSS = 2;
-export const LINE = 3;
+const CROSS = 2;
+const LINE = 3;
 
 const inner = (n: number) => n >= 1 && n <= 8;
 

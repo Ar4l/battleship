@@ -5,7 +5,7 @@ import { resolveAttack, resolvedCells } from './resolve';
 import { SHIP_NAMES, configFlags, fleetLegal } from './rules';
 import type { Answer, Attack, Cell, Config, Entry, Fleet } from './types';
 
-export type Verdict = { ok: true } | { ok: false; reason: string };
+type Verdict = { ok: true } | { ok: false; reason: string };
 
 const word = (code: number): string => (code ? (code > 1 ? `their ${SHIP_NAMES[code - 2]} sunk` : 'a hit') : 'a miss');
 const same = (g: Entry, w: Entry) => g.cell === w.cell && g.code === w.code && (g.code < 2 || encodeShip(g.ship!) === encodeShip(w.ship!));
@@ -23,8 +23,11 @@ function diff(attack: Attack, got: Answer, want: Answer): string | null {
   const w0 = ws[0];
   const g0 = gs[0];
   if (attack.k === 'item' && attack.item === TORPEDO) {
-    if (w0 && g0?.cell !== w0.cell) return `their torpedo passed through a ship at ${cellName(w0.cell)}`;
-    if (g0 && !w0) return `they reported a torpedo hit at ${cellName(g0.cell)} but it was water`;
+    // Compare where along the line each answer stops (99: no hit).
+    const line = footprint(TORPEDO, attack.a, attack.b);
+    const [gi, wi] = [g0, w0].map((e) => (e ? line.indexOf(e.cell) : 99));
+    if (gi! < wi!) return `they reported a torpedo hit at ${cellName(g0!.cell)} but it was water`;
+    if (wi! < gi!) return `their torpedo passed through a ship at ${cellName(w0!.cell)}`;
   }
   for (let i = 0; i < Math.max(gs.length, ws.length); i++) {
     const g = gs[i];

@@ -5,7 +5,7 @@
   border: 1px solid var(--fg);
   border-radius: 2px;
   background: var(--water);
-  min-width: 0;
+  width: 0;
   flex: 1;
   font-size: 14px;
 }

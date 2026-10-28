@@ -123,7 +123,7 @@ const dot = (cls: string, c: number, r: number, extra = '') => `<circle class="$
 const delay = (ms: number) => (ms ? ` style="animation-delay:${ms}ms"` : '');
 
 /** Ship outline; `round` draws a capsule. */
-export function shipRect(ship: Ship, len: number, cls: string, inset: number, round = true): string {
+function shipRect(ship: Ship, len: number, cls: string, inset: number, round = true): string {
   const c = ship.anchor;
   const w = ship.vertical ? 1 : len;
   const hh = ship.vertical ? len : 1;

@@ -2,6 +2,12 @@ import type { Sfx } from '../app/controller';
 
 let ctx: AudioContext | null = null;
 let out: GainNode;
+let idle = 0;
+/** Suspend the audio thread 2 s after the last sound (battery on phones). */
+const rest = () => {
+  clearTimeout(idle);
+  idle = window.setTimeout(() => void ctx?.suspend(), 2000);
+};
 const get = (): Storage | null => {
   try {
     return localStorage;
@@ -24,6 +30,7 @@ export function unlockAudio(): void {
   out = ctx.createGain();
   out.gain.value = 0.25;
   out.connect(ctx.destination);
+  rest();
 }
 
 const gain = (v: number) => {
@@ -64,6 +71,7 @@ function tone(type: OscillatorType, from: number, to: number, dur: number, at = 
 export function play(s: Sfx): void {
   if (muted || !ctx) return;
   void ctx.resume();
+  rest();
   if (s === 'miss') noise(0.12, 'bandpass', 900);
   else if (s === 'hit') tone('sine', 110, 55, 0.18, 0, 0.9), noise(0.06, 'lowpass', 2000, 0.6);
   else if (s === 'sunk') [440, 330, 220].forEach((f, i) => tone('triangle', f, f * 0.98, 0.12, i * 0.12, 0.5));

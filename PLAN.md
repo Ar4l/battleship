@@ -159,7 +159,7 @@ room = joinRoom({ appId: 'aral.cc-battleship',
   - Host after 6 s: if `getRelaySockets()` reports no socket in `readyState === 1`, set `net:'relays-down'` and show the direct-link panel prominently ("Can't reach the matchmaking network. Use a direct link instead."). Otherwise, wait for the friend indefinitely. A link reading "Trouble connecting? Use a direct link" is always visible.
   - Guest after 10 s with no host handshake: set `slow:true`. The guest sees "Still looking for game 4821. Check the code, or ask your friend for a direct link." with a Retry button. The guest keeps listening in the background.
   - `onJoinError` after SDP was exchanged means ICE failed. The fallback uses the same STUN servers and would fail the same way, so the guest goes straight to `notice('failed')`. The host can't tell its friend from a stray peer at that point (ICE fails before the handshake), so it forgets the peer and stays in the lobby, where the direct link is one tap away. If the error is a handshake timeout, go back to waiting.
-  - After the channel opens, if `pc.connectionState === 'failed'`, or it stays `'disconnected'` for more than 20 s (long enough for a quick switch to a messenger app), go to `notice('left')` ("Your opponent left or lost connection.").
+  - After the channel opens, if `pc.connectionState === 'failed'`, or it stays `'disconnected'` for more than 20 s (long enough for a quick switch to a messenger app), go to `notice('left')` ("Your opponent left or lost connection."). Trystero's own 5 s close after `'disconnected'` is patched to 25 s at build time (`vite.config.ts`), so our 20 s rule decides. In practice Chromium moves a silent peer to `'failed'` about 16 s after it stops answering (about 10 s after `'disconnected'`), so a peer frozen for up to about 15 s keeps the game on both paths; longer would need an ICE restart, which has no signalling channel left.
 
 ### 4.2 Direct-link fallback (`net/direct.ts`, `proto/sdp.ts`)
 
@@ -498,11 +498,13 @@ applyAnswer(m, answer): { m, events: UiEvent[] } | { cheat: string }
 
 | Asset | Budget (gzip -9) | Measured |
 |---|---|---|
-| `index.html` with inlined CSS | ≤ 5 KB | 5.0 KB |
-| app JS (entry chunk: game + proto + ui + room) | ≤ 19 KB | 18.6 KB |
+| `index.html` with inlined CSS | ≤ 5.2 KB | 5.0 KB |
+| app JS (entry chunk: game + proto + ui + room) | ≤ 19 KB | 18.7 KB |
 | Trystero chunk (lazy, trimmed) | ≤ 16 KB | 15.6 KB |
-| direct-link chunks (lazy: SDP packing, fallback flows and screens) | ≤ 4.5 KB | 4.0 KB |
-| **Code game total (html + entry + Trystero)** | **≤ 40 KB hard** | **39.2 KB** |
+| direct-link chunks (lazy: SDP packing, fallback flows and screens) | ≤ 4.5 KB | 3.8 KB |
+| **Code game total (html + entry + Trystero)** | **≤ 40 KB hard** | **39.4 KB** |
+
+Measured values are approximate (rounded, as of the round-3 review fixes); `npm run size` prints exact ones. Only the 40 KB total is hard; the per-file rows are guard rails with some slack so a small CSS change doesn't fail a deploy while the total still fits.
 
 - The first plan (9 KB entry, 37 KB target) underestimated the UI and anti-cheat code. Instead of raising the budget, the Trystero chunk was trimmed from 22.0 KB to 15.6 KB (`build/trystero/`: no media, no public actions, a one-frame JSON wire for internal messages, no room-password challenge), Vite's preload helper was replaced by a pass-through, the CSS was merged and deduplicated, and the game, protocol and UI modules were rewritten more compactly.
 - No fonts, images or audio files. The favicon is an inline SVG data URI.
@@ -553,7 +555,7 @@ applyAnswer(m, answer): { m, events: UiEvent[] } | { cheat: string }
 2. **`forward.spec.ts`**: within context A, a second page opens `#a=<blob>` and shows "Sent to your game tab". The host page connects.
 3. **`cheat.spec.ts`**: B sets `__bs.lie('miss-on-hit', 'E4')` and the game is played to the end. A shows "Cheating detected: they reported a miss at E4 but a ship was there".
 4. **`leave.spec.ts`**: closing B's page mid-battle makes A show "Your opponent left".
-5. **`failed.spec.ts`**: with a test hook that sets `iceServers: []` and replaces candidates with an unreachable address, A shows "Couldn't connect — your network may be blocking peer-to-peer" within 20 s, and Retry returns home.
+5. **`failed.spec.ts`**: with the host pasting a fake answer whose only candidate is an unreachable address (`__bs.fakeAnswer()`), A shows "Couldn't connect — your network may be blocking peer-to-peer" within 20 s, and Retry returns home.
 6. **`trystero.spec.ts` (tagged `@net`)**
    - It first checks whether `wss://tracker.openwebtorrent.com` can be opened and skips if it cannot.
    - A: Create and read the code. B: type the code. Both reach placement within 15 s.

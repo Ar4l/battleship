@@ -85,6 +85,11 @@ describe('verifyOpponent', () => {
     t[2]!.answer = { k: 'cells', entries: [] };
     expect(await verifyOpponent(c, commit, salt, FLEET_B, t)).toEqual({ ok: false, reason: 'Cheating detected: their torpedo passed through a ship at J5' });
   });
+  it('detects a torpedo hit reported on water before the real ship', async () => {
+    const { salt, commit, t, c } = await setup();
+    t[2]!.answer = { k: 'cells', entries: [{ cell: 59, code: 1 }] };
+    expect(await verifyOpponent(c, commit, salt, FLEET_B, t)).toEqual({ ok: false, reason: 'Cheating detected: they reported a torpedo hit at J6 but it was water' });
+  });
   it('detects a board changed after the commit and a wrong salt', async () => {
     const { salt, commit, t, c } = await setup();
     const moved = FLEET_B.slice();

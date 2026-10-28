@@ -5,7 +5,7 @@
  */
 import { STUN, fromChannel, gameChannel, type Transport } from './transport';
 
-export const APP_ID = 'aral.cc-battleship';
+const APP_ID = 'aral.cc-battleship';
 /** Live WebTorrent trackers (tracker.btorrent.xyz from the defaults is dead). */
 const TRACKERS = ['open.ftorrent.com', 'tracker.webtorrent.dev', 'tracker.openwebtorrent.com', 'tracker.files.fm:7073/announce'].map((u) => 'wss://' + u);
 

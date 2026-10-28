@@ -24,7 +24,8 @@ export function installDebug(ctrl: Controller): void {
       if (ctrl.state.s === 'placement') ctrl.setFleet(randomFleet(ctrl.config.noTouch, ctrl.rng));
     },
     setFleet: (f: Controller['fleet']) => ctrl.setFleet(f),
-    lie: (_kind: 'miss-on-hit', cell: string) => lie(ctrl, (+cell.slice(1) - 1) * 10 + 'ABCDEFGHIJ'.indexOf(cell[0]!)),
+    /** Answer "miss" whenever this cell (e.g. 'E4') is hit. */
+    lie: (cell: string) => lie(ctrl, (+cell.slice(1) - 1) * 10 + 'ABCDEFGHIJ'.indexOf(cell[0]!)),
     /** An answer blob pointing at an unreachable address. */
     fakeAnswer: () =>
       packSdp(`a=ice-ufrag:abcd\r\na=ice-pwd:abcdefghijklmnopqrstuvwx\r\na=fingerprint:sha-256 ${fp}\r\na=candidate:1 1 udp 2130706431 192.0.2.1 9 typ host\r\n`, 'answer'),

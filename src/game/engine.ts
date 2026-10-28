@@ -4,7 +4,7 @@ import { FLEET, TOTAL_SHIP_CELLS, neighbours8, shipCells } from './rules';
 import type { Answer, Attack, Cell, Config, Fleet, Ship } from './types';
 
 export type Side = 'me' | 'them';
-export type Phase = 'myTurn' | 'awaitingAnswer' | 'theirTurn' | 'over';
+type Phase = 'myTurn' | 'awaitingAnswer' | 'theirTurn' | 'over';
 
 export interface BoardView {
   /** Resolved cells (fired at, struck, or crossed by a torpedo). */
@@ -20,7 +20,7 @@ export interface BoardView {
   last: Cell[];
 }
 
-export interface Stats {
+interface Stats {
   shots: number;
   hits: number;
   turns: number;
@@ -158,7 +158,7 @@ export function remoteAttack(m: Match, attack: Attack): { answer: Answer } | { c
 }
 
 /** Live checks on an answer to my pending attack. null when plausible. */
-export function checkAnswer(m: Match, answer: Answer): string | null {
+function checkAnswer(m: Match, answer: Answer): string | null {
   const attack = m.pending;
   const b = m.target;
   if (!attack) return 'they answered without an attack';

@@ -27,7 +27,7 @@ test('cheat: a defender who reports a miss on a hit is caught and named', async 
     { anchor: 90, vertical: false },
     { anchor: 9, vertical: true },
   ]);
-  await bs(B, 'lie', 'miss-on-hit', 'E4');
+  await bs(B, 'lie', 'E4');
   await readyBoth(A, B);
   await playOut(A, B, A);
   await expect(A.locator('#verdict')).toContainText('Cheating detected: they reported a miss at E4 but a ship was there');
