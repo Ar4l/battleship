@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const NET = !!process.env.NET;
+// The @net Trystero spec self-skips when no tracker is reachable; NET=0 excludes it.
+const NO_NET = process.env.NET === '0';
 
 export default defineConfig({
   testDir: 'e2e',
@@ -10,7 +11,7 @@ export default defineConfig({
   workers: 2,
   retries: 0,
   reporter: [['list']],
-  grepInvert: NET ? undefined : /@net/,
+  grepInvert: NO_NET ? /@net/ : undefined,
   use: {
     baseURL: 'http://localhost:4173/battleship/',
     trace: 'retain-on-failure',
