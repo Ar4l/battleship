@@ -1,42 +1,29 @@
-import { FLEET, occupancyPartial, shipCells } from './rules';
-import { footprint, TORPEDO, SONAR } from './items';
+import { FLEET, occupancy, shipCells } from './rules';
+import { footprint, SONAR, TORPEDO } from './items';
 import type { Answer, Attack, Cell, Entry, Fleet } from './types';
 
 /** Cells an attack strikes directly (fire and area items), filtered to untargeted ones. Not used for torpedo/sonar. */
-export function strikeCells(attack: Attack, shot: ReadonlySet<Cell>): Cell[] {
-  if (attack.k === 'fire') return attack.cells.slice();
-  return footprint(attack.item, attack.a, attack.b).filter((c) => !shot.has(c));
-}
+export const strikeCells = (attack: Attack, shot: ReadonlySet<Cell>): Cell[] =>
+  attack.k === 'fire' ? attack.cells.slice() : footprint(attack.item, attack.a, attack.b).filter((c) => !shot.has(c));
 
 /**
  * The single source of truth for what a defender must answer.
  * `shot` is every cell of the defender's board already resolved before this attack.
  */
 export function resolveAttack(fleet: Fleet, shot: ReadonlySet<Cell>, attack: Attack): Answer {
-  const occ = occupancyPartial(fleet, false) ?? new Int8Array(100).fill(-1);
+  const occ = occupancy(fleet, false) ?? new Int8Array(100).fill(-1);
   const local = new Set(shot);
-  const entryFor = (cell: Cell): Entry => {
+  const entry = (cell: Cell): Entry => {
     local.add(cell);
     const s = occ[cell]!;
-    if (s < 0) return { cell, code: 0 };
-    const cells = shipCells(fleet[s]!, FLEET[s]!)!;
-    if (cells.every((x) => local.has(x))) return { cell, code: 2 + s, ship: { ...fleet[s]! } };
-    return { cell, code: 1 };
+    return s < 0 ? { cell, code: 0 } : shipCells(fleet[s]!, FLEET[s]!)!.every((x) => local.has(x)) ? { cell, code: 2 + s, ship: { ...fleet[s]! } } : { cell, code: 1 };
   };
-  if (attack.k === 'item' && attack.item === SONAR) {
-    let count = 0;
-    for (const c of footprint(SONAR, attack.a, attack.b)) if (occ[c]! >= 0 && !shot.has(c)) count++;
-    return { k: 'sonar', count };
-  }
+  if (attack.k === 'item' && attack.item === SONAR) return { k: 'sonar', count: footprint(SONAR, attack.a, 0).filter((c) => occ[c]! >= 0 && !shot.has(c)).length };
   if (attack.k === 'item' && attack.item === TORPEDO) {
-    for (const c of footprint(TORPEDO, attack.a, attack.b)) {
-      if (local.has(c)) continue;
-      if (occ[c]! >= 0) return { k: 'cells', entries: [entryFor(c)] };
-      local.add(c);
-    }
-    return { k: 'cells', entries: [] };
+    const hit = footprint(TORPEDO, attack.a, attack.b).find((c) => !shot.has(c) && occ[c]! >= 0);
+    return { k: 'cells', entries: hit === undefined ? [] : [entry(hit)] };
   }
-  return { k: 'cells', entries: strikeCells(attack, shot).map(entryFor) };
+  return { k: 'cells', entries: strikeCells(attack, shot).map(entry) };
 }
 
 /**
@@ -45,15 +32,8 @@ export function resolveAttack(fleet: Fleet, shot: ReadonlySet<Cell>, attack: Att
  */
 export function resolvedCells(attack: Attack, answer: Answer, shot: ReadonlySet<Cell>): Cell[] {
   if (answer.k === 'sonar') return [];
-  if (attack.k === 'item' && attack.item === TORPEDO) {
-    const stop = answer.entries[0]?.cell;
-    const out: Cell[] = [];
-    for (const c of footprint(TORPEDO, attack.a, attack.b)) {
-      if (shot.has(c)) continue;
-      out.push(c);
-      if (c === stop) break;
-    }
-    return out;
-  }
-  return answer.entries.map((e) => e.cell);
+  if (attack.k !== 'item' || attack.item !== TORPEDO) return answer.entries.map((e) => e.cell);
+  const line = footprint(TORPEDO, attack.a, attack.b).filter((c) => !shot.has(c));
+  const stop = answer.entries[0]?.cell;
+  return stop === undefined ? line : line.slice(0, line.indexOf(stop) + 1);
 }

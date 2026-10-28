@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Controller } from '../../src/app/controller';
+import { lie } from '../../src/app/debug';
+import { encode, type Msg } from '../../src/proto/codec';
 import { memoryPair } from '../../src/net/transport';
 import { shipCells, FLEET } from '../../src/game/rules';
 import { shotsAllowed, untargeted } from '../../src/game/engine';
@@ -14,6 +16,9 @@ const until = async (f: () => boolean, ms = 3000) => {
   }
 };
 const shipCellsOf = (f: Fleet) => f.flatMap((s, i) => shipCells(s, FLEET[i]!)!);
+
+/** Send a raw message from `c` to its opponent. */
+const raw = (c: Controller, m: Msg) => (c as unknown as { t: { send(u: Uint8Array): void } }).t.send(encode(m));
 
 async function connect(config: Partial<Config>) {
   const H = new Controller();
@@ -115,7 +120,7 @@ describe('controller over an in-memory transport', () => {
   it('detects a lying defender and names the cell', async () => {
     const { H, G } = await connect({ mode: 0 });
     await placeAndStart(H, G);
-    G.lie = { kind: 'miss-on-hit', cell: 9 }; // J1, part of FLEET_B's carrier
+    lie(G, 9); // J1, part of FLEET_B's carrier
     await playOut(H, G);
     await until(() => H.state.s === 'end' && !!H.state.theirFleet);
     const hs = H.state;
@@ -135,6 +140,7 @@ describe('controller over an in-memory transport', () => {
       const m = me.match!;
       expect(m.phase).toBe('awaitingAnswer');
       await until(() => m.phase !== 'awaitingAnswer');
+      expect(me.lastResult).toMatch(/^Time's up\. You /);
       expect(m.target.shot.size).toBe(mode === 1 ? 5 : 1);
       if (mode === 1) expect(m.target.shot.has(0)).toBe(true);
       H.leave();
@@ -148,5 +154,43 @@ describe('controller over an in-memory transport', () => {
     await until(() => H.state.s === 'notice');
     expect(H.state).toMatchObject({ s: 'notice', kind: 'left', detail: 'battle' });
     expect(G.state.s).toBe('home');
+  });
+
+  it('salvo results name the shooter', async () => {
+    const { H, G } = await connect({ mode: 1 });
+    await placeAndStart(H, G);
+    const me = H.match!.phase === 'myTurn' ? H : G;
+    const them = me === H ? G : H;
+    const ships = (me === H ? FLEET_B : FLEET_A).flatMap((s, i) => shipCells(s, FLEET[i]!)!);
+    expect(me.attack({ k: 'fire', cells: [ships[0]!, ...untargeted(me.match!.target).filter((c) => !ships.includes(c)).slice(0, 4)] })).toBe(true);
+    await until(() => me.match!.phase !== 'awaitingAnswer');
+    expect(me.lastResult).toBe(`You hit ${'ABCDEFGHIJ'[ships[0]! % 10]}${Math.floor(ships[0]! / 10) + 1}`);
+    expect(them.lastResult).toBe(me.lastResult.replace('You', 'They'));
+  });
+
+  it('a REVEAL mid-battle ends the game as their forfeit; a late CONFIG is ignored', async () => {
+    const { H, G } = await connect({ mode: 0 });
+    await placeAndStart(H, G);
+    raw(H, { t: 'reveal', salt: new Uint8Array(16), fleet: FLEET_A });
+    await until(() => G.state.s === 'end');
+    expect(G.match!.winner).toBe('me');
+    raw(H, { t: 'config', config: { mode: 2, extraShot: false, noTouch: true, timer: 0 } });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(G.state.s).toBe('end');
+    expect(G.config.mode).toBe(0);
+  });
+
+  it('keeps saying HELLO until the other side hears it', async () => {
+    const [a, b] = memoryPair();
+    const H = new Controller();
+    const G = new Controller();
+    // The guest's first HELLOs are lost, as if the host had not created the channel yet.
+    let drop = 3;
+    const send = b.send;
+    b.send = (u) => (drop-- > 0 ? undefined : send(u));
+    G.attach(b, 'guest');
+    await new Promise((r) => setTimeout(r, 300));
+    H.attach(a, 'host');
+    await until(() => H.state.s === 'placement' && G.state.s === 'placement');
   });
 });

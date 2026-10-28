@@ -4,9 +4,9 @@ import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 
 const KB = 1000;
-// Hard budgets (gzip). The product aim is "well under 40 KB" for a full
-// Trystero session; see README for where the bytes go.
-const BUDGET = { html: 5.6 * KB, entry: 23 * KB, trystero: 23 * KB, direct: 3 * KB, session: 51 * KB };
+// Hard budgets (gzip -9). The product aim is "well under 40 KB" for everything a
+// code game downloads (html + entry + Trystero); PLAN.md §12 has the breakdown.
+const BUDGET = { html: 5 * KB, entry: 19 * KB, trystero: 16 * KB, direct: 4.5 * KB, session: 40 * KB };
 
 const files = [];
 const walk = (d) => readdirSync(d).forEach((f) => (statSync(join(d, f)).isDirectory() ? walk(join(d, f)) : files.push(join(d, f))));

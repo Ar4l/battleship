@@ -1,4 +1,4 @@
-import { svg } from './h';
+import { html } from './h';
 
 const PATHS = {
   copy: 'M8 8h11v11H8zM5 16V5h11',
@@ -12,9 +12,4 @@ const PATHS = {
 
 export type IconName = keyof typeof PATHS;
 
-export const icon = (name: IconName): SVGElement =>
-  svg(
-    'svg',
-    { viewBox: '0 0 24 24', width: 20, height: 20, 'aria-hidden': 'true', class: 'icon', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.5, 'stroke-linecap': 'square' },
-    svg('path', { d: PATHS[name] }),
-  );
+export const icon = (name: IconName): Element => html(`<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="${PATHS[name]}"/></svg>`);

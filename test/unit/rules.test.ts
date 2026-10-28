@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { canPlace, decodeConfig, encodeConfig, fleetLegal, occupancy, rulesLine, shipCells } from '../../src/game/rules';
 import { cellName, decodeFleet, encodeFleet, parseCell } from '../../src/game/board';
-import { randomFleet, seededRng } from '../../src/game/random';
+import { randomFleet } from '../../src/game/random';
+import { seededRng } from '../../src/game/seeded';
 import type { Config } from '../../src/game/types';
 import { FLEET_A, FLEET_B } from './helpers';
 
@@ -31,7 +32,8 @@ describe('rules', () => {
     expect(fleetLegal(diagonal, true)).toBe(false);
     expect(canPlace(FLEET_A, 4, { anchor: 15, vertical: false }, true)).toBe(false);
     expect(canPlace(FLEET_A, 4, { anchor: 16, vertical: false }, true)).toBe(true);
-    expect(occupancy(FLEET_A.slice(0, 4), false)).toBeNull();
+    expect(fleetLegal(FLEET_A.slice(0, 4), false)).toBe(false);
+    expect(occupancy(FLEET_A.slice(0, 4), false)).not.toBeNull();
   });
   it('config bytes round-trip', () => {
     const cs: Config[] = [

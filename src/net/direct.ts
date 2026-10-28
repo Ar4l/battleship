@@ -1,4 +1,6 @@
+import type { Controller } from '../app/controller';
 import { packSdp, unpackSdp } from '../proto/sdp';
+import { forwardAnswer, listenForAnswers } from './forward';
 import { STUN, fromChannel, gameChannel, type Transport } from './transport';
 
 export class DirectError extends Error {}
@@ -83,8 +85,9 @@ export async function createDirectHost(): Promise<DirectHost> {
       if (accepted) return;
       const desc = unpackSdp(blobFrom(answer));
       if (!desc || desc.type !== 'answer') throw new DirectError('malformed');
-      accepted = true;
+      // Only lock once the answer is applied, so a bad paste can be corrected.
       await pc.setRemoteDescription(desc);
+      accepted = true;
       arm(15000);
     },
   };
@@ -114,4 +117,44 @@ export async function createDirectGuest(offer: string): Promise<DirectGuest | nu
   const blob = packSdp(mangle(pc.localDescription!.sdp), 'answer');
   if (!blob) return null;
   return { blob, transport: open, close: () => pc.close() };
+}
+
+// ---------- flows driven by the controller (this chunk loads on demand) ----------
+
+/** Host: make the offer link, accept a reply pasted or forwarded from another tab. */
+export async function host(c: Controller): Promise<void> {
+  if (c.state.s !== 'direct-host') return;
+  try {
+    const h = await createDirectHost();
+    if (c.state.s !== 'direct-host') return h.close();
+    c.accept = (a) =>
+      void h.accept(a).then(
+        () => c.patch('direct-host', { connecting: true, error: undefined }),
+        () => c.patch('direct-host', { error: 'That link looks incomplete. Ask for it again.' }),
+      );
+    c.closers.push(h.close, listenForAnswers((b) => c.accept?.(b)));
+    c.set({ s: 'direct-host', blob: h.blob });
+    c.link(h.transport);
+  } catch {
+    c.notice('failed');
+  }
+}
+
+/** Guest: answer the offer from a #o= link. */
+export async function guest(c: Controller, offer: string): Promise<void> {
+  if (c.state.s !== 'direct-guest') return;
+  try {
+    const g = await createDirectGuest(offer);
+    if (!g) return c.notice('bad-link');
+    c.closers.push(g.close);
+    c.set({ s: 'direct-guest', blob: g.blob });
+    c.link(g.transport);
+  } catch {
+    c.notice('failed');
+  }
+}
+
+/** A #a= reply opened in a new tab: hand it to the game tab, or show it for pasting. */
+export async function forward(c: Controller, blob: string): Promise<void> {
+  c.set({ s: 'forwarded', ok: await forwardAnswer(blob), blob });
 }

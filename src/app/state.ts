@@ -8,8 +8,8 @@ export type AppState =
   | { s: 'home'; code?: string }
   | { s: 'lobby-host'; code: number; relaysDown: boolean }
   | { s: 'lobby-guest'; code: number; slow: boolean }
-  | { s: 'direct-host'; step: 'gathering' | 'share' | 'connecting'; blob?: string; error?: string }
-  | { s: 'direct-guest'; step: 'gathering' | 'share' | 'connecting'; blob?: string }
+  | { s: 'direct-host'; blob?: string; error?: string; connecting?: boolean }
+  | { s: 'direct-guest'; blob?: string }
   | { s: 'forwarded'; ok: boolean; blob: string }
   | { s: 'placement'; ready: { me: boolean; them: boolean } }
   | { s: 'battle'; match: Match; banner?: string; stalled?: boolean }

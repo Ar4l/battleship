@@ -1,12 +1,12 @@
 import { cellName } from '../game/board';
 import { bytesEqual, commitBoard, commitCoin, hostStarts, randomBytes } from '../game/commit';
 import { applyAnswer, createMatch, localAttack, remoteAttack, shotsAllowed, untargeted, type Match } from '../game/engine';
-import { ITEMS } from '../game/items';
 import { cryptoRng, randomFleet } from '../game/random';
 import { DEFAULT_CONFIG, SHIP_NAMES, configFlags, fleetLegal } from '../game/rules';
 import type { Answer, Attack, Config, Fleet, Rng } from '../game/types';
 import { verifyOpponent } from '../game/verify';
-import { PROTO_VERSION, answerMsg, attackMsg, decode, encode, msgAnswer, msgAttack, type Msg } from '../proto/codec';
+import { PROTO_VERSION, decode, encode, type Msg } from '../proto/codec';
+import type { RoomEvents } from '../net/room';
 import type { Transport } from '../net/transport';
 import type { AppState, NoticeKind } from './state';
 
@@ -16,19 +16,13 @@ export type Sfx = 'miss' | 'hit' | 'sunk' | 'turn';
 export interface NetDeps {
   openRoom?: typeof import('../net/room').openRoom;
   randomCode?: () => number;
-  createDirectHost?: typeof import('../net/direct').createDirectHost;
-  createDirectGuest?: typeof import('../net/direct').createDirectGuest;
-  listenForAnswers?: typeof import('../net/forward').listenForAnswers;
-  forwardAnswer?: typeof import('../net/forward').forwardAnswer;
+  /** The direct-link fallback, loaded on demand. */
+  direct?: () => Promise<typeof import('../net/direct')>;
 }
 
-export interface Lie {
-  kind: 'miss-on-hit';
-  cell: number;
-}
-
-const REVEAL_WAIT_MS = 10000;
-const BANNER_MS = 1200;
+type Battle = Extract<AppState, { s: 'battle' }>;
+const UNVERIFIED = 'Opponent left before revealing their fleet — result not verified.';
+const doc = typeof document !== 'undefined' ? document : null;
 
 export class Controller {
   state: AppState = { s: 'home' };
@@ -42,52 +36,54 @@ export class Controller {
   /** Cells to animate on next render. */
   fx: { target: number[]; own: number[] } = { target: [], own: [] };
   deadline = 0;
-  lie: Lie | null = null;
   rng: Rng = cryptoRng;
   onSfx: (s: Sfx) => void = () => {};
   onAnnounce: (text: string) => void = () => {};
 
-  private listeners = new Set<() => void>();
+  /** Room, direct connection and tab listener cleanups (used by net/direct too). */
+  closers: (() => void)[] = [];
+  /** Direct host: apply a pasted reply. */
+  accept: ((a: string) => void) | null = null;
+  private ls = new Set<() => void>();
   private t: Transport | null = null;
-  private room: { leave(): void } | null = null;
-  private directClose: (() => void) | null = null;
-  private stopForward: (() => void) | null = null;
+  private timers: Record<string, number> = {};
   private gameNo = 0;
   private hostStartedLast = false;
   private salt: Uint8Array = new Uint8Array(16);
   private nonce: Uint8Array = new Uint8Array(16);
-  private theirBoardCommit: Uint8Array | null = null;
-  private theirCoinCommit: Uint8Array | null = null;
+  private theirBoard: Uint8Array | null = null;
+  private theirCoin: Uint8Array | null = null;
   private theirNonce: Uint8Array | null = null;
   private sentCoin = false;
   private revealed = false;
-  private timers = new Map<string, number>();
   private gotHello = false;
-  private lastCode = 0;
+  private gotFrame = false;
+  lastCode = 0;
   private readying = false;
+  private timedOut = false;
 
   constructor(private net: NetDeps = {}) {
     this.fleet = randomFleet(false, this.rng);
   }
 
-  subscribe(f: () => void): () => void {
-    this.listeners.add(f);
-    return () => this.listeners.delete(f);
+  subscribe(f: () => void): void {
+    this.ls.add(f);
   }
-  private set(s: AppState): void {
+  emit(): void {
+    this.ls.forEach((f) => f());
+  }
+  set(s: AppState): void {
     this.state = s;
     this.emit();
   }
-  emit(): void {
-    for (const f of this.listeners) f();
+  /** Patch the current state if it is still of kind `s`. */
+  patch(s: AppState['s'], p: object): void {
+    if (this.state.s === s) this.set({ ...this.state, ...p } as AppState);
   }
-  private timer(name: string, ms: number, f: () => void): void {
-    clearTimeout(this.timers.get(name));
-    this.timers.set(name, setTimeout(() => (this.timers.delete(name), f()), ms) as unknown as number);
-  }
-  private untimer(name: string): void {
-    clearTimeout(this.timers.get(name));
-    this.timers.delete(name);
+  /** Start (or with no `f`, cancel) a named timer. */
+  private timer(name: string, ms = 0, f?: () => void): void {
+    clearTimeout(this.timers[name]);
+    if (f) this.timers[name] = setTimeout(f, ms) as unknown as number;
   }
   private send(m: Msg): void {
     this.t?.send(encode(m));
@@ -99,178 +95,143 @@ export class Controller {
 
   // ---------- connection ----------
 
+  /** Close every network resource and timer. */
+  teardown(role = this.role): void {
+    Object.values(this.timers).forEach(clearTimeout);
+    this.timers = {};
+    this.t?.close();
+    this.t = null;
+    this.closers.forEach((f) => f());
+    this.closers = [];
+    this.accept = null;
+    this.deadline = 0;
+    this.role = role;
+  }
+
+  private room(role: 'host' | 'guest', code: number): void {
+    const ev: RoomEvents = {
+      transport: (t) => this.attach(t, role),
+      full: () => this.notice('room-full'),
+      failed: () => this.notice('failed'),
+      relaysDown: () => this.patch('lobby-host', { relaysDown: true }),
+      slow: () => this.patch('lobby-guest', { slow: true }),
+      code: (c) => this.patch('lobby-host', { code: (this.lastCode = c) }),
+    };
+    this.closers.push(this.net.openRoom!(role, code, ev).leave);
+  }
+
+  /** Drop the current connection and start over as `role`. */
+  private go(role: 'host' | 'guest', s: AppState, code = 0): void {
+    this.teardown(role);
+    this.lastCode = code;
+    this.set(s);
+  }
+
   createGame(): void {
     if (!this.net.openRoom) return;
-    this.teardown();
-    this.role = 'host';
     const code = this.net.randomCode!();
-    this.lastCode = code;
-    this.set({ s: 'lobby-host', code, relaysDown: false });
-    this.room = this.net.openRoom('host', code, {
-      transport: (t) => this.attach(t, 'host'),
-      full: () => {},
-      failed: () => this.notice('failed'),
-      relaysDown: () => this.state.s === 'lobby-host' && this.set({ ...this.state, relaysDown: true }),
-      slow: () => {},
-      code: (c) => {
-        this.lastCode = c;
-        if (this.state.s === 'lobby-host') this.set({ ...this.state, code: c });
-      },
-    });
+    this.go('host', { s: 'lobby-host', code, relaysDown: false }, code);
+    this.room('host', code);
   }
 
   joinCode(code: number): void {
     if (!this.net.openRoom) return;
-    this.teardown();
-    this.role = 'guest';
-    this.lastCode = code;
-    this.set({ s: 'lobby-guest', code, slow: false });
-    this.room = this.net.openRoom('guest', code, {
-      transport: (t) => this.attach(t, 'guest'),
-      full: () => this.notice('room-full'),
-      failed: () => this.notice('failed'),
-      relaysDown: () => {},
-      slow: () => this.state.s === 'lobby-guest' && this.set({ ...this.state, slow: true }),
-      code: () => {},
-    });
+    this.go('guest', { s: 'lobby-guest', code, slow: false }, code);
+    this.room('guest', code);
   }
 
-  async startDirectHost(): Promise<void> {
-    if (!this.net.createDirectHost) return;
-    this.teardown();
-    this.role = 'host';
-    this.set({ s: 'direct-host', step: 'gathering' });
-    try {
-      const h = await this.net.createDirectHost();
-      if (this.state.s !== 'direct-host') return h.close();
-      this.directClose = h.close;
-      this.directAccept = async (a: string) => {
-        try {
-          await h.accept(a);
-          if (this.state.s === 'direct-host') this.set({ ...this.state, step: 'connecting', error: undefined });
-        } catch {
-          if (this.state.s === 'direct-host') this.set({ ...this.state, error: 'That link looks incomplete. Ask for it again.' });
-        }
-      };
-      this.stopForward = this.net.listenForAnswers?.((b) => void this.directAccept?.(b)) ?? null;
-      this.set({ s: 'direct-host', step: 'share', blob: h.blob });
-      h.transport.then(
-        (t) => this.attach(t, 'host'),
-        () => this.state.s === 'direct-host' && this.notice('failed'),
-      );
-    } catch {
-      this.notice('failed');
-    }
+  /** Attach when the link opens; fail if it never does. */
+  link(p: Promise<Transport>): void {
+    const s = this.state.s;
+    p.then(
+      (t) => this.attach(t, this.role),
+      () => this.state.s === s && this.notice('failed'),
+    );
   }
-  private directAccept: ((a: string) => Promise<void>) | null = null;
+
+  /** Direct-link fallback: the flows live in the lazy net/direct chunk. */
+  async startDirectHost(): Promise<void> {
+    this.go('host', { s: 'direct-host' });
+    (await this.net.direct?.())?.host(this);
+  }
+
   pasteAnswer(text: string): void {
-    void this.directAccept?.(text);
+    this.accept?.(text);
   }
 
   async openOffer(blob: string): Promise<void> {
-    if (!this.net.createDirectGuest) return;
-    this.teardown();
-    this.role = 'guest';
-    this.set({ s: 'direct-guest', step: 'gathering' });
-    try {
-      const g = await this.net.createDirectGuest(blob);
-      if (!g) return this.notice('bad-link');
-      this.directClose = g.close;
-      this.set({ s: 'direct-guest', step: 'share', blob: g.blob });
-      g.transport.then(
-        (t) => this.attach(t, 'guest'),
-        () => this.state.s === 'direct-guest' && this.notice('failed'),
-      );
-    } catch {
-      this.notice('failed');
-    }
+    this.go('guest', { s: 'direct-guest' });
+    (await this.net.direct?.())?.guest(this, blob);
   }
 
   async openAnswer(blob: string): Promise<void> {
-    const ok = (await this.net.forwardAnswer?.(blob)) ?? false;
-    this.set({ s: 'forwarded', ok, blob });
+    (await this.net.direct?.())?.forward(this, blob);
+  }
+
+  private hello(): void {
+    this.send({ t: 'hello', ver: PROTO_VERSION, role: this.role === 'host' ? 0 : 1 });
   }
 
   /** Channel to the opponent is open. */
   attach(t: Transport, role: 'host' | 'guest'): void {
-    this.stopForward?.();
-    this.stopForward = null;
     this.t = t;
     this.role = role;
     this.gameNo = 0;
-    this.gotHello = false;
+    this.gotHello = this.gotFrame = false;
     t.onmessage = (u8) => this.onFrame(u8);
     t.onclose = () => this.peerGone();
-    this.send({ t: 'hello', ver: PROTO_VERSION, role: role === 'host' ? 0 : 1 });
+    // Each side creates channel 512 on its own schedule, and a message sent
+    // before the other side has created it is dropped. Repeat HELLO until
+    // anything arrives; give up if the game never starts.
+    const hello = () => {
+      if (this.gotFrame || this.t !== t) return;
+      this.hello();
+      this.timer('hello', 250, hello);
+    };
+    hello();
+    this.timer('watchdog', 6000, () => this.gameNo || this.notice('failed'));
   }
 
-  private notice(kind: NoticeKind, detail?: string): void {
+  notice(kind: NoticeKind, detail?: string): void {
     this.teardown();
     this.set({ s: 'notice', kind, code: this.lastCode || undefined, detail });
   }
 
-  /** Close every network resource and timer. */
-  private teardown(): void {
-    for (const t of this.timers.values()) clearTimeout(t);
-    this.timers.clear();
-    this.t?.close();
-    this.t = null;
-    this.room?.leave();
-    this.room = null;
-    this.directClose?.();
-    this.directClose = null;
-    this.directAccept = null;
-    this.stopForward?.();
-    this.stopForward = null;
-    this.deadline = 0;
-  }
-
   leave(): void {
     this.send({ t: 'bye' });
-    const code = this.lastCode;
     this.teardown();
     this.lastCode = 0;
-    this.set({ s: 'home', code: undefined });
-    void code;
+    this.set({ s: 'home' });
   }
 
+  /** Back home; a guest gets their code pre-filled. */
   retry(): void {
-    const code = this.lastCode;
+    const code = this.role === 'guest' && this.lastCode;
     this.teardown();
     this.set({ s: 'home', code: code ? String(code) : undefined });
   }
 
   /** Stop waiting for a stalled opponent: forfeit win, unverified. */
   leaveStalled(): void {
-    const s = this.state;
-    if (s.s !== 'battle') return this.leave();
+    if (this.state.s !== 'battle') return this.leave();
     this.send({ t: 'bye' });
     this.teardown();
-    s.match.winner = 'me';
-    s.match.phase = 'over';
     this.set({ s: 'notice', kind: 'left', detail: 'stalled' });
   }
 
   private peerGone(): void {
     this.t = null;
     const s = this.state;
-    if (s.s === 'end') {
-      if (s.verdict === 'pending') {
-        s.verdict = 'unverified';
-        s.reason = 'Opponent left before revealing their fleet — result not verified.';
-      }
-      this.teardown();
-      this.set({ ...s, peerLeft: true });
-      return;
-    }
-    this.notice('left', s.s === 'battle' ? 'battle' : undefined);
+    if (s.s !== 'end') return this.notice('left', s.s === 'battle' ? 'battle' : undefined);
+    this.teardown();
+    this.set({ ...s, peerLeft: true, ...(s.verdict === 'pending' && { verdict: 'unverified', reason: UNVERIFIED }) });
   }
 
   // ---------- settings / placement ----------
 
   setConfig(c: Partial<Config>): void {
     this.config = { ...this.config, ...c };
-    if (this.config.mode !== 0) this.config.extraShot = false;
+    if (this.config.mode) this.config.extraShot = false;
     this.emit();
   }
 
@@ -285,11 +246,10 @@ export class Controller {
   }
 
   private toPlacement(): void {
-    this.untimer('reveal');
+    this.timer('reveal');
     this.fleet = randomFleet(this.config.noTouch, this.rng);
-    this.theirBoardCommit = this.theirCoinCommit = this.theirNonce = null;
-    this.sentCoin = false;
-    this.revealed = false;
+    this.theirBoard = this.theirCoin = this.theirNonce = null;
+    this.sentCoin = this.revealed = false;
     this.sel = [];
     this.lastResult = '';
     this.gameNo++;
@@ -317,36 +277,28 @@ export class Controller {
   private maybeStart(): void {
     const s = this.state;
     if (s.s !== 'placement' || !s.ready.me || !s.ready.them) return;
+    const host = this.role === 'host';
+    // Game 1: commit-reveal coin toss. Rematches: the other player starts.
+    let hostFirst = !this.hostStartedLast;
     if (this.gameNo === 1) {
-      if (!this.sentCoin) {
-        this.sentCoin = true;
-        this.send({ t: 'coin', nonce: this.nonce });
-      }
+      if (!this.sentCoin) this.send({ t: 'coin', nonce: this.nonce });
+      this.sentCoin = true;
       if (!this.theirNonce) return;
-      const [h, g] = this.role === 'host' ? [this.nonce, this.theirNonce] : [this.theirNonce, this.nonce];
-      this.startBattle(hostStarts(h, g) === (this.role === 'host'), true);
-    } else {
-      const hostStarts = !this.hostStartedLast;
-      this.startBattle(hostStarts === (this.role === 'host'), false);
+      hostFirst = host ? hostStarts(this.nonce, this.theirNonce) : hostStarts(this.theirNonce, this.nonce);
     }
-  }
-
-  private startBattle(iStart: boolean, coin: boolean): void {
-    this.hostStartedLast = iStart === (this.role === 'host');
-    const match = createMatch(this.config, this.fleet, iStart);
+    this.hostStartedLast = hostFirst;
+    const iStart = hostFirst === host;
     const banner = iStart ? 'You go first' : 'They go first';
     this.fx = { target: [], own: [] };
-    this.set({ s: 'battle', match, banner });
-    this.onAnnounce(coin ? `Coin toss: ${banner.toLowerCase()}.` : `${banner}.`);
-    this.timer('banner', BANNER_MS, () => {
-      if (this.state.s === 'battle') this.set({ ...this.state, banner: undefined });
-    });
+    this.set({ s: 'battle', match: createMatch(this.config, this.fleet, iStart), banner });
+    this.onAnnounce(this.gameNo === 1 ? `Coin toss: ${banner.toLowerCase()}.` : `${banner}.`);
+    this.timer('banner', 1200, () => this.patch('battle', { banner: undefined }));
     this.turnStarted();
   }
 
   // ---------- battle ----------
 
-  /** Salvo: toggle a cell in the selection. Fires when full and `fireWhenFull`. */
+  /** Salvo: toggle a cell in the selection. */
   toggleSel(cell: number): void {
     const m = this.match;
     if (!m || m.phase !== 'myTurn' || m.target.shot.has(cell)) return;
@@ -369,133 +321,126 @@ export class Controller {
       return false;
     }
     this.sel = [];
-    this.untimer('turn');
+    this.timer('turn');
     this.deadline = 0;
-    this.send(attackMsg(a));
+    this.send(a.k === 'fire' ? { t: 'fire', cells: a.cells } : { t: 'use', item: a.item, a: a.a, b: a.b });
+    this.timer('stall', 30000, () => this.stalled('awaitingAnswer'));
     this.emit();
     return true;
   }
 
   fireSalvo(): boolean {
     const m = this.match;
-    if (!m || this.sel.length !== shotsAllowed(m, 'me')) return false;
-    return this.attack({ k: 'fire', cells: this.sel.slice() });
+    return !!m && this.sel.length === shotsAllowed(m, 'me') && this.attack({ k: 'fire', cells: this.sel.slice() });
+  }
+
+  private stalled(phase: Match['phase']): void {
+    if (this.match?.phase === phase) this.patch('battle', { stalled: true });
   }
 
   private turnStarted(): void {
-    const s = this.state;
-    if (s.s !== 'battle') return;
-    const m = s.match;
-    this.untimer('turn');
-    this.untimer('stall');
-    const secs = this.config.timer;
-    if (m.phase === 'myTurn') {
-      this.onSfx('turn');
-      if (typeof document !== 'undefined') document.title = 'Your turn · Battleship';
-      if (secs) {
-        this.deadline = Date.now() + secs * 1000;
-        this.timer('turn', secs * 1000, () => this.autoAct());
-      }
-    } else {
-      if (typeof document !== 'undefined') document.title = 'Battleship';
-      if (secs) {
-        this.deadline = Date.now() + secs * 1000;
-        this.timer('stall', (secs + 15) * 1000, () => {
-          if (this.state.s === 'battle' && this.state.match.phase === 'theirTurn') this.set({ ...this.state, stalled: true });
-        });
-      }
-    }
+    const m = this.match;
+    if (!m) return;
+    const secs = this.config.timer * 1000;
+    const mine = m.phase === 'myTurn';
+    this.timer('turn');
+    this.timer('stall');
+    if (doc) doc.title = mine ? 'Your turn · Battleship' : 'Battleship';
+    if (mine) this.onSfx('turn');
+    if (!secs) return;
+    this.deadline = Date.now() + secs;
+    if (mine) this.timer('turn', secs, () => this.autoAct());
+    else this.timer('stall', secs + 15000, () => this.stalled('theirTurn'));
   }
 
   /** Turn timer ran out: fire randomly (Salvo fills the remaining selection). */
   autoAct(): void {
     const m = this.match;
     if (!m || m.phase !== 'myTurn') return;
-    const free = untargeted(m.target).filter((c) => !this.sel.includes(c));
-    const need = shotsAllowed(m, 'me') - (m.config.mode === 1 ? this.sel.length : 0);
     const cells = m.config.mode === 1 ? this.sel.slice() : [];
-    for (let i = 0; i < need && free.length; i++) cells.push(free.splice(this.rng(free.length), 1)[0]!);
-    this.attack({ k: 'fire', cells });
+    const free = untargeted(m.target).filter((c) => !cells.includes(c));
+    while (cells.length < shotsAllowed(m, 'me') && free.length) cells.push(free.splice(this.rng(free.length), 1)[0]!);
+    this.timedOut = this.attack({ k: 'fire', cells });
   }
 
-  private describe(entries: Answer, mine: boolean): string {
-    if (entries.k === 'sonar') return mine ? `Sonar: ${entries.count} ship cell${entries.count === 1 ? '' : 's'}` : 'They used sonar';
-    const parts: string[] = [];
-    for (const e of entries.entries) {
-      if (e.code >= 2) parts.push(mine ? `You sank their ${SHIP_NAMES[e.code - 2]}` : `They sank your ${SHIP_NAMES[e.code - 2]}`);
-    }
-    if (parts.length) return parts.join('. ');
-    if (!entries.entries.length) return mine ? 'Torpedo ran clean' : 'Their torpedo ran clean';
-    const hits = entries.entries.filter((e) => e.code).map((e) => cellName(e.cell));
-    if (entries.entries.length === 1) return `${mine ? 'You fired at ' : 'They fired at '}${cellName(entries.entries[0]!.cell)}: ${hits.length ? 'hit' : 'miss'}`;
-    return hits.length ? `${hits.length} hit${hits.length > 1 ? 's' : ''}: ${hits.join(' ')}` : 'All miss';
-  }
-
-  private sfxFor(a: Answer): void {
-    if (a.k === 'sonar') return this.onSfx('miss');
-    this.onSfx(a.entries.some((e) => e.code >= 2) ? 'sunk' : a.entries.some((e) => e.code) ? 'hit' : 'miss');
+  private describe(a: Answer, mine: boolean): string {
+    const who = mine ? 'You' : 'They';
+    if (a.k === 'sonar') return mine ? `Sonar: ${a.count} ship cell${a.count === 1 ? '' : 's'}` : 'They used sonar';
+    const e = a.entries;
+    const sunk = e.filter((x) => x.code > 1).map((x) => `${who} sank ${mine ? 'their' : 'your'} ${SHIP_NAMES[x.code - 2]}`);
+    if (sunk.length) return sunk.join('. ');
+    if (!e.length) return `${mine ? 'Your' : 'Their'} torpedo ran clean`;
+    const hits = e.filter((x) => x.code).map((x) => cellName(x.cell));
+    if (e.length === 1) return `${who} fired at ${cellName(e[0]!.cell)}: ${hits.length ? 'hit' : 'miss'}`;
+    return hits.length ? `${who} hit ${hits.join(', ')}` : `${who} missed all ${e.length}`;
   }
 
   private onFrame(u8: Uint8Array): void {
     const m = decode(u8);
     const s = this.state;
-    if (!m) {
-      if (s.s === 'battle') this.cheat('they sent an invalid message');
-      return;
-    }
+    if (!m) return s.s === 'battle' ? this.cheat('they sent an invalid message') : undefined;
+    this.gotFrame = true;
     switch (m.t) {
       case 'hello':
         if (m.ver !== PROTO_VERSION) return this.notice('version');
+        // The guest answers every HELLO, so the host hears one even if the guest's own were dropped.
+        if (this.role === 'guest') return this.hello();
         if (this.gotHello) return;
         this.gotHello = true;
-        if (this.role === 'host') {
-          this.send({ t: 'config', config: this.config });
+        this.send({ t: 'config', config: this.config });
+        return this.toPlacement();
+      case 'config':
+        if (this.role === 'guest' && !this.gameNo) {
+          this.config = m.config;
           this.toPlacement();
         }
         return;
-      case 'config':
-        if (this.role !== 'guest' || s.s === 'placement' || s.s === 'battle') return;
-        this.config = m.config;
-        this.toPlacement();
-        return;
       case 'ready':
         if (s.s !== 'placement' || s.ready.them) return;
-        this.theirBoardCommit = m.board;
-        this.theirCoinCommit = m.coin;
+        this.theirBoard = m.board;
+        this.theirCoin = m.coin;
         s.ready.them = true;
         this.emit();
-        this.maybeStart();
-        return;
+        return this.maybeStart();
       case 'coin':
-        if (s.s !== 'placement' || !this.theirCoinCommit || this.theirNonce) return;
+        if (s.s !== 'placement' || !this.theirCoin || this.theirNonce) return;
         void commitCoin(m.nonce).then((c) => {
-          if (!this.theirCoinCommit || !bytesEqual(c, this.theirCoinCommit)) return this.notice('invalid-move');
+          if (!this.theirCoin || !bytesEqual(c, this.theirCoin)) return this.notice('invalid-move');
           this.theirNonce = m.nonce;
           this.maybeStart();
         });
         return;
       case 'fire':
+        return this.onAttack({ k: 'fire', cells: m.cells });
       case 'use':
-        return this.onAttack(msgAttack(m)!);
+        return this.onAttack({ k: 'item', item: m.item, a: m.a, b: m.b });
       case 'answer':
+        return this.onAnswer({ k: 'cells', entries: m.entries });
       case 'sonar':
-        return this.onAnswer(msgAnswer(m)!);
+        return this.onAnswer({ k: 'sonar', count: m.count });
       case 'reveal':
         return void this.onReveal(m.salt, m.fleet);
       case 'verdict':
-        if (s.s === 'end') this.set({ ...s, theirVerdict: m.ok });
-        return;
+        return this.patch('end', { theirVerdict: m.ok });
       case 'rematch':
         if (s.s !== 'end') return;
         if (m.config && this.role === 'guest') this.config = m.config;
         s.rematch.them = true;
-        if (s.rematch.me) this.toPlacement();
-        else this.emit();
-        return;
+        return s.rematch.me ? this.toPlacement() : this.emit();
       case 'bye':
         this.t?.close();
         return this.peerGone();
     }
+  }
+
+  private result(s: Battle, text: string, a: Answer): void {
+    const p = s.match.phase;
+    this.lastResult = text;
+    this.onSfx(a.k === 'sonar' ? 'miss' : a.entries.some((e) => e.code > 1) ? 'sunk' : a.entries.some((e) => e.code) ? 'hit' : 'miss');
+    if (p === 'over') return this.gameOver(text);
+    this.set({ ...s, stalled: false, banner: undefined });
+    this.onAnnounce(text + (p === 'myTurn' ? '. Your turn.' : '.'));
+    this.turnStarted();
   }
 
   private onAttack(a: Attack): void {
@@ -503,61 +448,37 @@ export class Controller {
     if (s.s !== 'battle') return;
     const r = remoteAttack(s.match, a);
     if ('cheat' in r) return this.cheat(r.cheat);
-    let wire = r.answer;
-    const lie = this.lie;
-    if (lie && wire.k === 'cells' && wire.entries.some((e) => e.cell === lie.cell && e.code)) {
-      wire = { k: 'cells', entries: wire.entries.map((e) => (e.cell === lie.cell ? { cell: e.cell, code: 0 } : e)) };
-    }
-    this.send(answerMsg(wire));
+    const w = r.answer;
+    this.send(w.k === 'sonar' ? { t: 'sonar', count: w.count } : { t: 'answer', entries: w.entries });
     this.fx = { target: [], own: s.match.own.last.slice() };
-    const text = this.describe(r.answer, false);
-    this.lastResult = text;
-    this.sfxFor(r.answer);
-    if (s.match.phase === 'over') return this.gameOver(text);
-    this.set({ ...s, stalled: false, banner: undefined });
-    this.onAnnounce(text + (s.match.phase === 'myTurn' ? '. Your turn.' : '.'));
-    this.turnStarted();
+    this.result(s, this.describe(w, false), w);
   }
 
   private onAnswer(a: Answer): void {
     const s = this.state;
-    if (s.s !== 'battle' || s.match.phase !== 'awaitingAnswer') {
-      if (s.s === 'battle') this.cheat('they answered out of turn');
-      return;
-    }
+    if (s.s !== 'battle') return;
+    if (s.match.phase !== 'awaitingAnswer') return this.cheat('they answered out of turn');
     const r = applyAnswer(s.match, a);
     if ('cheat' in r) return this.cheat(r.cheat);
     this.fx = { target: s.match.target.last.slice(), own: [] };
-    const text = this.describe(a, true);
-    this.lastResult = text;
-    this.sfxFor(a);
-    if ((s.match.phase as string) === 'over') return this.gameOver(text);
-    this.set({ ...s, banner: undefined });
-    this.onAnnounce(text + '.');
-    this.turnStarted();
+    const text = (this.timedOut ? "Time's up. " : '') + this.describe(a, true);
+    this.timedOut = false;
+    this.result(s, text, a);
   }
 
   // ---------- end of game ----------
 
-  private reveal(): void {
-    if (this.revealed) return;
-    this.revealed = true;
-    this.send({ t: 'reveal', salt: this.salt, fleet: this.fleet });
-  }
-
   private toEnd(match: Match, verdict: 'pending' | 'cheat', reason?: string): void {
-    this.untimer('turn');
-    this.untimer('stall');
-    this.untimer('banner');
+    for (const n of ['turn', 'stall', 'banner']) this.timer(n);
     this.deadline = 0;
     match.phase = 'over';
-    if (typeof document !== 'undefined') document.title = 'Battleship';
+    if (doc) doc.title = 'Battleship';
     this.set({ s: 'end', match, verdict, reason, theirVerdict: null, rematch: { me: false, them: false }, peerLeft: false });
-    this.reveal();
-    this.timer('reveal', REVEAL_WAIT_MS, () => {
+    if (!this.revealed) this.send({ t: 'reveal', salt: this.salt, fleet: this.fleet });
+    this.revealed = true;
+    this.timer('reveal', 10000, () => {
       const e = this.state;
-      if (e.s === 'end' && e.verdict === 'pending')
-        this.set({ ...e, verdict: 'unverified', reason: 'Opponent left before revealing their fleet — result not verified.' });
+      if (e.s === 'end' && e.verdict === 'pending') this.set({ ...e, verdict: 'unverified', reason: UNVERIFIED });
     });
   }
 
@@ -570,8 +491,8 @@ export class Controller {
   private cheat(reason: string): void {
     const s = this.state;
     if (s.s !== 'battle') return;
-    const full = 'Cheating detected: ' + reason + '.';
-    if (s.match.winner === null) s.match.winner = 'me';
+    const full = `Cheating detected: ${reason}.`;
+    s.match.winner ??= 'me';
     this.toEnd(s.match, 'cheat', full);
     this.onAnnounce(full);
   }
@@ -579,18 +500,19 @@ export class Controller {
   private async onReveal(salt: Uint8Array, fleet: Fleet): Promise<void> {
     let s = this.state;
     if (s.s === 'battle') {
-      // They ended the game (game over, or they flagged us); reveal back.
+      // They ended the game early (they flagged us, or they quit by revealing): counts as their forfeit.
+      s.match.winner ??= 'me';
       this.toEnd(s.match, 'pending');
       s = this.state;
     }
-    if (s.s !== 'end' || !this.theirBoardCommit) return;
-    this.untimer('reveal');
-    const v = await verifyOpponent(this.config, this.theirBoardCommit, salt, fleet, s.match.transcript);
+    if (s.s !== 'end' || !this.theirBoard) return;
+    this.timer('reveal');
+    // The rules this game was played under, not the ones the host may be editing now.
+    const v = await verifyOpponent(s.match.config, this.theirBoard, salt, fleet, s.match.transcript);
     this.send({ t: 'verdict', ok: v.ok });
     const e = this.state;
     if (e.s !== 'end') return;
-    if (v.ok) this.set({ ...e, theirFleet: fleet, verdict: e.verdict === 'cheat' ? 'cheat' : 'verified' });
-    else this.set({ ...e, theirFleet: fleet, verdict: 'cheat', reason: v.reason });
+    this.set({ ...e, theirFleet: fleet, ...(v.ok ? e.verdict !== 'cheat' && { verdict: 'verified' } : { verdict: 'cheat', reason: v.reason }) });
     this.onAnnounce(v.ok ? 'Fleet verified.' : v.reason);
   }
 
@@ -607,11 +529,5 @@ export class Controller {
   toggleEditing(): void {
     const s = this.state;
     if (s.s === 'end' && this.role === 'host') this.set({ ...s, editing: !s.editing });
-  }
-
-  /** Item cost check helper for the UI. */
-  canAfford(item: number): boolean {
-    const m = this.match;
-    return !!m && m.phase === 'myTurn' && m.energy.me >= ITEMS[item]!.cost;
   }
 }

@@ -1,79 +1,65 @@
 import type { Controller } from '../../app/controller';
 import { sunkCount } from '../../game/engine';
-import { Board } from '../grid';
+import { board } from '../grid';
 import { h } from '../h';
 import { icon } from '../icons';
 import { btn, label, settings, type Screen } from '../kit';
-import { ownModel, targetModel } from './battle';
+import { cap, model } from './battle';
 
 export function end(ctrl: Controller): Screen {
-  const target = new Board({ label: 'Their waters', interactive: false });
-  const own = new Board({ label: 'Your fleet', interactive: false });
-  own.el.classList.add('mini');
-  const head = h('div', { cls: 'end-head' });
-  const stats = h('div', { cls: 'end-stats' });
-  const actions = h('div', { cls: 'end-actions' });
+  const target = board('Their waters', false);
+  const own = board('Your fleet', true);
+  const head = h('div', 'end-head');
+  const stats = h('dl', 'stats');
+  const actions = h('div', 'end-actions');
   const el = h(
     'section',
-    { cls: 'screen end' },
+    'screen end',
     head,
     actions,
-    h('div', { cls: 'end-boards' }, h('div', null, h('div', { cls: 'cap-label label' }, 'Their waters'), target.el), h('div', { cls: 'end-own' }, h('div', { cls: 'cap-label label' }, 'Your fleet'), own.el)),
     stats,
+    h('div', 'end-boards', h('div', null, cap('Their waters'), target.el), h('div', null, cap('Your fleet'), own.el)),
   );
   let lastKey = '';
   const render = () => {
     const s = ctrl.state;
     if (s.s !== 'end') return;
     const m = s.match;
-    target.update(targetModel(m, { reveal: s.theirFleet }));
-    own.update(ownModel(m, []));
+    target.update(model(m.target, { reveal: s.theirFleet }));
+    own.update(model(m.own, { own: m.fleet }));
     const key = JSON.stringify([s.verdict, s.reason, s.theirVerdict, s.rematch, s.peerLeft, s.editing, !!s.theirFleet, ctrl.config]);
     if (key === lastKey) return;
     lastKey = key;
-    const title = m.winner === 'me' ? 'You won' : m.winner === 'them' ? 'You lost' : 'Game over';
-    let verdict: Node;
-    if (s.verdict === 'verified') verdict = h('p', { cls: 'verdict ok', id: 'verdict' }, icon('check'), h('span', null, 'Fleet verified'));
-    else if (s.verdict === 'cheat') verdict = h('div', { cls: 'verdict cheat', id: 'verdict' }, h('p', null, s.reason ?? 'Cheating detected.'));
-    else if (s.verdict === 'pending') verdict = h('p', { cls: 'verdict muted', id: 'verdict' }, 'Checking their fleet…');
-    else verdict = h('p', { cls: 'verdict muted', id: 'verdict' }, s.reason ?? 'Result not verified.');
+    const v = s.verdict;
     head.replaceChildren(
       label('Game over'),
-      h('h2', { cls: 'h1', id: 'result' }, title),
-      verdict,
+      h('h2', { cls: 'h1', id: 'result' }, m.winner === 'me' ? 'You won' : m.winner ? 'You lost' : 'Game over'),
+      h(
+        'p',
+        { cls: 'verdict ' + (v === 'verified' ? 'ok' : v), id: 'verdict' },
+        v === 'verified' ? [icon('check'), h('span', null, 'Fleet verified')] : v === 'pending' ? 'Checking their fleet…' : (s.reason ?? 'Result not verified.'),
+      ),
       s.theirVerdict === null ? '' : h('p', { cls: 'small muted', id: 'their-verdict' }, s.theirVerdict ? 'Opponent verified your fleet' : "Opponent's check failed"),
     );
     const st = m.stats.me;
-    const rows: [string, string][] = [
-      ['Shots', String(st.shots)],
-      ['Hits', String(st.hits)],
+    const rows: [string, number | string][] = [
+      ['Shots', st.shots],
+      ['Hits', st.hits],
       ['Accuracy', st.shots ? Math.round((st.hits / st.shots) * 100) + '%' : '–'],
-      ['Ships lost', String(sunkCount(m.own))],
-      ['Turns', String(st.turns)],
+      ['Ships lost', sunkCount(m.own)],
+      ['Turns', st.turns],
     ];
-    if (m.config.mode === 2) rows.push(['Items used', String(st.items)]);
-    stats.replaceChildren(h('table', { cls: 'stats' }, h('tbody', null, rows.map(([k, v]) => h('tr', null, h('th', { scope: 'row' }, k), h('td', { cls: 'mono' }, v))))));
+    if (m.config.mode === 2) rows.push(['Items used', st.items]);
+    stats.replaceChildren(...rows.map(([k, n]) => h('div', null, h('dt', null, k), h('dd', 'mono', n))));
     const host = ctrl.role === 'host';
-    const note = s.peerLeft
-      ? 'Opponent left.'
-      : s.rematch.me
-        ? host
-          ? 'Waiting for opponent…'
-          : s.rematch.them
-            ? ''
-            : 'Waiting for host…'
-        : s.rematch.them
-          ? 'Opponent wants a rematch.'
-          : '';
+    const r = s.rematch;
+    const open = !r.me && !s.peerLeft;
+    const rematch = btn('Rematch', () => ctrl.rematch(), 'primary', 'rematch');
+    rematch.disabled = !open;
+    const note = s.peerLeft ? 'Opponent left.' : r.me ? (host ? 'Waiting for opponent…' : !r.them && 'Waiting for host…') : r.them && 'Opponent wants a rematch.';
     actions.replaceChildren(
-      s.editing ? h('div', { cls: 'end-settings' }, settings(ctrl.config, (p) => ctrl.setConfig(p))) : '',
-      h(
-        'div',
-        { cls: 'row-btns' },
-        btn('Rematch', () => ctrl.rematch(), { primary: true, disabled: s.rematch.me || s.peerLeft, id: 'rematch' }),
-        host && !s.rematch.me && !s.peerLeft ? btn(s.editing ? 'Done' : 'Change mode', () => ctrl.toggleEditing(), { id: 'change-mode' }) : null,
-        btn('Leave', () => ctrl.leave(), { quiet: true }),
-      ),
+      s.editing ? h('div', 'end-settings', settings(ctrl.config, (p) => ctrl.setConfig(p))) : '',
+      h('div', 'row-btns', rematch, host && open && btn(s.editing ? 'Done' : 'Change mode', () => ctrl.toggleEditing(), '', 'change-mode')),
       note ? h('p', { cls: 'status-line', id: 'rematch-note' }, note) : '',
     );
   };

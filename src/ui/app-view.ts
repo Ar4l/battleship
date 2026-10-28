@@ -5,7 +5,6 @@ import { h } from './h';
 import { icon } from './icons';
 import type { Screen } from './kit';
 import { battle } from './screens/battle';
-import { directGuest, directHost, forwarded } from './screens/direct';
 import { end } from './screens/end';
 import { home, mark } from './screens/home';
 import { lobbyGuest, lobbyHost } from './screens/lobby';
@@ -13,29 +12,49 @@ import { notice } from './screens/notice';
 import { placement } from './screens/placement';
 import { isMuted, play, setMuted, unlockAudio } from './sound';
 
+type Direct = typeof import('./screens/direct');
+let direct: Direct | null = null;
+
 /** Mounts the shell and swaps screens when the state kind changes. */
 export function mountApp(root: HTMLElement, ctrl: Controller): void {
-  const muteBtn = h('button', { type: 'button', cls: 'iconbtn', id: 'mute', 'aria-label': 'Sound' });
+  const mute = h('button', { cls: 'iconbtn', id: 'mute', 'aria-label': 'Sound' });
   const paintMute = () => {
-    muteBtn.setAttribute('aria-pressed', String(!isMuted()));
-    muteBtn.title = isMuted() ? 'Sound off' : 'Sound on';
-    muteBtn.replaceChildren(icon(isMuted() ? 'soundOff' : 'soundOn'));
+    mute.setAttribute('aria-pressed', String(!isMuted()));
+    mute.title = isMuted() ? 'Sound off' : 'Sound on';
+    mute.replaceChildren(icon(isMuted() ? 'soundOff' : 'soundOn'));
   };
-  muteBtn.addEventListener('click', () => {
+  mute.onclick = () => {
     unlockAudio();
     setMuted(!isMuted());
     paintMute();
-  });
+  };
   paintMute();
-  const brand = h('div', { cls: 'brand' }, mark(), h('span', null, 'Battleship'));
-  const meta = h('div', { cls: 'meta small mono muted' });
-  const leaveBtn = h('button', { type: 'button', cls: 'textlink small', id: 'leave', onclick: () => ctrl.leave() }, 'Leave');
-  const header = h('header', { cls: 'top' }, brand, meta, h('div', { cls: 'top-right' }, leaveBtn, muteBtn));
+  // Leaving a live game takes two steps: "Leave" asks, "Leave" again confirms.
+  // "Stay" lands where "Leave" was, so a double tap is harmless.
+  const confirm = (on: boolean) => {
+    header.classList.toggle('confirm', on);
+    if (on) stay.focus();
+  };
+  const live = () => ctrl.state.s === 'placement' || ctrl.state.s === 'battle';
+  const leave = h('button', { cls: 'textlink', id: 'leave', onclick: () => (live() ? confirm(true) : ctrl.leave()) }, 'Leave');
+  const yes = h('button', { cls: 'textlink ask', id: 'leave-yes', 'aria-label': 'Leave this game', onclick: () => ctrl.leave() }, 'Leave');
+  const stay = h('button', { cls: 'textlink ask', id: 'stay', 'aria-label': 'Stay in this game', onclick: () => (confirm(false), leave.focus()) }, 'Stay');
+  const meta = h('div', 'meta small mono muted');
+  const header = h(
+    'header',
+    'top',
+    h('div', 'brand', mark(), h('span', null, 'Battleship')),
+    meta,
+    h('p', 'ask', 'Leave this game?'),
+    yes,
+    stay,
+    leave,
+    mute,
+  );
   const main = h('main', { id: 'main' });
   root.replaceChildren(header, main);
   mountAnnouncer(root);
-  document.addEventListener('pointerdown', unlockAudio, { once: true, capture: true });
-  document.addEventListener('keydown', unlockAudio, { once: true, capture: true });
+  for (const ev of ['pointerdown', 'keydown']) document.addEventListener(ev, unlockAudio, { once: true, capture: true });
   ctrl.onSfx = play;
   ctrl.onAnnounce = announce;
 
@@ -45,32 +64,33 @@ export function mountApp(root: HTMLElement, ctrl: Controller): void {
     const s = ctrl.state;
     if (s.s !== kind) {
       kind = s.s;
-      screen?.destroy?.();
-      const make = {
-        home: () => home(ctrl, s.s === 'home' ? s.code : ''),
-        'lobby-host': () => lobbyHost(ctrl),
-        'lobby-guest': () => lobbyGuest(ctrl),
-        'direct-host': () => directHost(ctrl),
-        'direct-guest': () => directGuest(ctrl),
-        forwarded: () => forwarded(ctrl),
-        placement: () => placement(ctrl),
-        battle: () => battle(ctrl),
-        end: () => end(ctrl),
-        notice: () => notice(ctrl),
-      }[s.s];
-      screen = make();
+      confirm(false);
+      const lazy = s.s === 'direct-host' ? 'directHost' : s.s === 'direct-guest' ? 'directGuest' : s.s === 'forwarded' ? 'forwarded' : null;
+      if (lazy && !direct)
+        void import('./screens/direct').then((d) => {
+          direct = d;
+          kind = '';
+          render();
+        });
+      screen = lazy
+        ? direct
+          ? direct[lazy](ctrl)
+          : { el: h('section') }
+        : ({ home: () => home(ctrl, s.s === 'home' ? s.code : ''), 'lobby-host': lobbyHost, 'lobby-guest': lobbyGuest, placement, battle, end, notice } as Record<string, (c: Controller) => Screen>)[
+            s.s
+          ]!(ctrl);
       main.replaceChildren(screen.el);
       document.body.dataset.screen = s.s;
-      const focusable = screen.el.querySelector<HTMLElement>('h1, h2, [autofocus]');
+      const focusable = screen.el.querySelector<HTMLElement>('h2');
       if (s.s !== 'home' && focusable) {
         focusable.tabIndex = -1;
         focusable.focus({ preventScroll: true });
       }
-      window.scrollTo(0, 0);
+      scrollTo(0, 0);
     } else screen?.update?.();
-    const inGame = s.s === 'placement' || s.s === 'battle' || s.s === 'end';
+    const inGame = live() || s.s === 'end';
     header.classList.toggle('is-home', s.s === 'home');
-    leaveBtn.hidden = !inGame;
+    leave.hidden = !inGame;
     meta.textContent = inGame ? rulesLine(ctrl.config) : '';
   };
   ctrl.subscribe(render);

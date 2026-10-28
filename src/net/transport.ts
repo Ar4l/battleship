@@ -8,12 +8,9 @@ export interface Transport {
   /** Signal that the link is gone (calls onclose once). */
   end(reason: string): void;
 }
+type Pipe = Transport & { deliver(u8: Uint8Array): void };
 
-export const STUN: RTCIceServer[] = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun.cloudflare.com:3478' },
-];
+export const STUN: RTCIceServer[] = ['stun.l.google.com:19302', 'stun1.l.google.com:19302', 'stun.cloudflare.com:3478'].map((u) => ({ urls: 'stun:' + u }));
 
 /** Negotiated channel shared by Trystero and direct paths: label 'g', id 512. */
 export const gameChannel = (pc: RTCPeerConnection): RTCDataChannel => {
@@ -22,47 +19,35 @@ export const gameChannel = (pc: RTCPeerConnection): RTCDataChannel => {
   return dc;
 };
 
-/** Base transport with an inbox so messages arriving before onmessage is set are kept. */
-function base(sendRaw: (u8: Uint8Array) => void, closeRaw: () => void): Transport {
+/** Messages arriving before onmessage is set are kept in an inbox. */
+function pipe(sendRaw: (u8: Uint8Array) => void, closeRaw: () => void): Pipe {
   const inbox: Uint8Array[] = [];
-  let onmessage: ((u8: Uint8Array) => void) | null = null;
+  let f: ((u8: Uint8Array) => void) | null = null;
   let done = false;
-  const t: Transport = {
-    send: (u8) => {
-      if (!done) sendRaw(u8);
-    },
+  const t: Pipe = {
+    send: (u8) => done || sendRaw(u8),
     get onmessage() {
-      return onmessage;
+      return f;
     },
-    set onmessage(f) {
-      onmessage = f;
-      if (f) while (inbox.length) f(inbox.shift()!);
+    set onmessage(g) {
+      f = g;
+      while (g && inbox.length) g(inbox.shift()!);
     },
     onclose: null,
     close: () => {
-      if (done) return;
-      done = true;
-      closeRaw();
+      if (!done) (done = true), closeRaw();
     },
     end: (reason) => {
-      if (done) return;
-      done = true;
-      closeRaw();
-      t.onclose?.(reason);
+      if (!done) t.close(), t.onclose?.(reason);
     },
-  };
-  (t as Transport & { _deliver: (u8: Uint8Array) => void })._deliver = (u8) => {
-    if (done) return;
-    if (onmessage) onmessage(u8);
-    else inbox.push(u8);
+    deliver: (u8) => done || (f ? f(u8) : inbox.push(u8)),
   };
   return t;
 }
-const deliver = (t: Transport, u8: Uint8Array) => (t as unknown as { _deliver: (u8: Uint8Array) => void })._deliver(u8);
 
 /** Resolve with a Transport once the channel opens. */
 export function fromChannel(dc: RTCDataChannel, pc: RTCPeerConnection, onClose?: () => void): Promise<Transport> {
-  const t = base(
+  const t = pipe(
     (u8) => {
       try {
         dc.send(u8 as Uint8Array<ArrayBuffer>);
@@ -79,32 +64,26 @@ export function fromChannel(dc: RTCDataChannel, pc: RTCPeerConnection, onClose?:
       onClose?.();
     },
   );
-  dc.onmessage = (e) => deliver(t, new Uint8Array(e.data as ArrayBuffer));
+  dc.onmessage = (e) => t.deliver(new Uint8Array(e.data as ArrayBuffer));
   dc.onclose = () => t.end('closed');
-  let discTimer = 0;
+  let disc = 0;
   pc.addEventListener('connectionstatechange', () => {
     const s = pc.connectionState;
-    clearTimeout(discTimer);
+    clearTimeout(disc);
     if (s === 'failed' || s === 'closed') t.end(s);
-    else if (s === 'disconnected') discTimer = window.setTimeout(() => t.end('disconnected'), 8000);
+    else if (s === 'disconnected') disc = window.setTimeout(() => t.end(s), 8000);
   });
-  return new Promise((res) => {
-    if (dc.readyState === 'open') res(t);
-    else dc.addEventListener('open', () => res(t), { once: true });
-  });
+  return new Promise((res) => (dc.readyState === 'open' ? res(t) : (dc.onopen = () => res(t))));
 }
 
 /** Two connected in-memory transports (tests). */
 export function memoryPair(): [Transport, Transport] {
-  let a: Transport;
-  let b: Transport;
-  a = base(
-    (u8) => setTimeout(() => deliver(b, u8.slice()), 0),
-    () => setTimeout(() => b.end('closed'), 0),
-  );
-  b = base(
-    (u8) => setTimeout(() => deliver(a, u8.slice()), 0),
-    () => setTimeout(() => a.end('closed'), 0),
-  );
+  const link = (other: () => Pipe) =>
+    pipe(
+      (u8) => setTimeout(() => other().deliver(u8.slice())),
+      () => setTimeout(() => other().end('closed')),
+    );
+  const a: Pipe = link(() => b);
+  const b: Pipe = link(() => a);
   return [a, b];
 }

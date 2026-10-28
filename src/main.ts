@@ -5,46 +5,37 @@ import { openRoom, prefetch, randomCode } from './net/room';
 import { mountApp } from './ui/app-view';
 
 // The direct-link fallback is loaded only when someone needs it.
-const direct = () => import('./net/direct');
-const forward = () => import('./net/forward');
-
-const ctrl = new Controller({
-  openRoom,
-  randomCode,
-  createDirectHost: async () => (await direct()).createDirectHost(),
-  createDirectGuest: async (o) => (await direct()).createDirectGuest(o),
-  listenForAnswers: (cb) => {
-    let stop = () => {};
-    let done = false;
-    void forward().then((f) => !done && (stop = f.listenForAnswers(cb)));
-    return () => ((done = true), stop());
-  },
-  forwardAnswer: async (b) => (await forward()).forwardAnswer(b),
-});
-let debug = false;
+const ctrl = new Controller({ openRoom, randomCode, direct: () => import('./net/direct') });
 try {
-  debug = localStorage.getItem('bs:debug') === '1';
+  if (localStorage.getItem('bs:debug') === '1') void import('./app/debug').then((d) => d.installDebug(ctrl));
 } catch {
   /* storage blocked */
 }
-if (debug) void import('./app/debug').then((d) => d.installDebug(ctrl));
 mountApp(document.getElementById('app')!, ctrl);
 
+const clearHash = () => history.replaceState(null, '', location.pathname + location.search);
 function route(): void {
   const hash = location.hash.slice(1);
-  if (/^\d{4}$/.test(hash) && +hash >= 1000) {
+  const blob = hash.slice(2);
+  const s = ctrl.state.s;
+  if (hash.startsWith('a=') && s === 'direct-host') {
+    // The reply link was opened in the game tab itself.
+    clearHash();
+    ctrl.pasteAnswer(blob);
+  } else if (s !== 'home') return;
+  else if (/^[1-9]\d{3}$/.test(hash)) {
     void prefetch();
     ctrl.joinCode(+hash);
   } else if (hash.startsWith('o=')) {
-    history.replaceState(null, '', location.pathname + location.search);
-    void ctrl.openOffer(hash.slice(2));
+    clearHash();
+    void ctrl.openOffer(blob);
   } else if (hash.startsWith('a=')) {
-    history.replaceState(null, '', location.pathname + location.search);
-    void ctrl.openAnswer(hash.slice(2));
+    clearHash();
+    void ctrl.openAnswer(blob);
   }
 }
 route();
-addEventListener('hashchange', () => {
-  if (ctrl.state.s === 'home') route();
-});
+addEventListener('hashchange', route);
+// Once connected, a #NNNN link has done its job; reopening the tab later must not join a stranger's game.
+ctrl.subscribe(() => ctrl.state.s === 'placement' && location.hash && clearHash());
 addEventListener('pagehide', () => ctrl.state.s !== 'home' && ctrl.leave());

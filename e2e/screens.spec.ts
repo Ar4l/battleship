@@ -122,6 +122,9 @@ for (const size of SIZES)
       expect(audit.cell).toBeGreaterThanOrEqual(24);
       await A.keyboard.press('Escape');
       await shot(B, `08-battle-waiting-${tag}`);
+      await B.click('#leave');
+      await shot(B, `08b-leave-confirm-${tag}`);
+      await B.click('#stay');
       await playOut(A, B, A);
       await expect(A.locator('#verdict')).toHaveText('Fleet verified');
       await expect(A.locator('#their-verdict')).toBeVisible();

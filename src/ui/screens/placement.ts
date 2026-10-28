@@ -1,201 +1,156 @@
 import type { Controller } from '../../app/controller';
 import { cellName } from '../../game/board';
 import { FLEET, SHIP_NAMES, canPlace, rulesLine } from '../../game/rules';
-import type { Fleet, Ship } from '../../game/types';
+import type { Ship } from '../../game/types';
 import { announce } from '../announce';
-import { Board, capsule, cellsOf } from '../grid';
+import { board, capsule, cellsOf } from '../grid';
 import { h } from '../h';
-import { btn, label, type Screen } from '../kit';
+import { blink, btn, label, type Screen } from '../kit';
 
-interface Ghost {
-  i: number;
-  ship: Ship;
-}
+type Ghost = { i: number; ship: Ship };
 
-/** Move an anchor by (dr, dc), keeping the ship on the board. */
-function shift(ship: Ship, len: number, dr: number, dc: number): Ship {
-  let r = Math.floor(ship.anchor / 10) + dr;
-  let c = (ship.anchor % 10) + dc;
-  const maxR = ship.vertical ? 10 - len : 9;
-  const maxC = ship.vertical ? 9 : 10 - len;
-  r = Math.max(0, Math.min(maxR, r));
-  c = Math.max(0, Math.min(maxC, c));
-  return { anchor: r * 10 + c, vertical: ship.vertical };
+/** Move ship i's anchor by (dr, dc) and/or flip it, keeping it on the board. */
+function shift(i: number, ship: Ship, dr = 0, dc = 0, flip = false): Ship {
+  const len = FLEET[i]!;
+  const v = ship.vertical !== flip;
+  const r = Math.max(0, Math.min(v ? 10 - len : 9, (ship.anchor - (ship.anchor % 10)) / 10 + dr));
+  const c = Math.max(0, Math.min(v ? 9 : 10 - len, (ship.anchor % 10) + dc));
+  return { anchor: r * 10 + c, vertical: v };
 }
-
-function rotated(ship: Ship, len: number): Ship {
-  return shift({ anchor: ship.anchor, vertical: !ship.vertical }, len, 0, 0);
-}
+const MOVES: Record<string, [number, number]> = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
 
 export function placement(ctrl: Controller): Screen {
   let sel = 0;
   let ghost: Ghost | null = null; // keyboard lift or drag
-  let drag: { i: number; offset: number; x: number; y: number; moved: boolean; pointer: number; target: Element } | null = null;
-  const noTouch = () => ctrl.config.noTouch;
-  const locked = () => ctrl.state.s === 'placement' && ctrl.state.ready.me;
-  const legal = (g: Ghost) => canPlace(ctrl.fleet, g.i, g.ship, noTouch());
-  const commit = (i: number, ship: Ship) => {
-    const f: Fleet = ctrl.fleet.slice();
-    f[i] = ship;
-    ctrl.setFleet(f);
+  let drag: { i: number; offset: number; x: number; y: number; moved: boolean; id: number } | null = null;
+  const locked = () => ctrl.state.s !== 'placement' || ctrl.state.ready.me;
+  const legal = (g: Ghost) => canPlace(ctrl.fleet, g.i, g.ship, ctrl.config.noTouch);
+  const where = (g: Ghost) => `${cellName(g.ship.anchor)} ${g.ship.vertical ? 'vertical' : 'horizontal'}`;
+  const snapback = () => {
+    b.el.classList.add('snapback');
+    setTimeout(() => b.el.classList.remove('snapback'), 160);
   };
+  /** Commit a legal ghost, or flash and explain. */
+  const place = (g: Ghost, ok: string, bad = "Can't place here.") => {
+    sel = g.i;
+    if (legal(g)) {
+      const f = ctrl.fleet.slice();
+      f[g.i] = g.ship;
+      ctrl.setFleet(f);
+      announce(ok);
+      return true;
+    }
+    announce(bad);
+    snapback();
+    return false;
+  };
+  const rotate = (i: number) => {
+    if (locked()) return;
+    const g = { i, ship: shift(i, ctrl.fleet[i]!, 0, 0, true) };
+    place(g, `${SHIP_NAMES[i]} ${where(g)}.`, "Can't rotate here.");
+    render();
+  };
+  const drop = (g: Ghost) => place(g, `${SHIP_NAMES[g.i]} placed at ${cellName(g.ship.anchor)}.`);
 
-  const shipAt = (cell: number): number => ctrl.fleet.findIndex((s, i) => cellsOf(s, i).includes(cell));
-
-  const board = new Board({
-    label: 'Your fleet',
-    interactive: false,
+  const b = board('Your fleet', false, {
     onPointerDown: (cell, e) => {
-      if (locked()) return;
-      const i = shipAt(cell);
-      if (i < 0) return;
+      const i = ctrl.fleet.findIndex((s, k) => cellsOf(s, k).includes(cell));
+      if (locked() || i < 0) return;
       e.preventDefault();
       const s = ctrl.fleet[i]!;
-      const offset = s.vertical ? Math.floor(cell / 10) - Math.floor(s.anchor / 10) : (cell % 10) - (s.anchor % 10);
-      const target = e.target as Element;
-      target.setPointerCapture?.(e.pointerId);
-      drag = { i, offset, x: e.clientX, y: e.clientY, moved: false, pointer: e.pointerId, target };
+      (e.target as Element).setPointerCapture?.(e.pointerId);
+      drag = { i, offset: s.vertical ? (cell - s.anchor) / 10 : cell - s.anchor, x: e.clientX, y: e.clientY, moved: false, id: e.pointerId };
       sel = i;
       render();
     },
   });
-  board.el.classList.add('placing');
-
-  const onMove = (e: PointerEvent) => {
-    if (!drag || e.pointerId !== drag.pointer) return;
-    if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 6) return;
+  b.el.classList.add('placing');
+  const on = (type: string, f: (e: PointerEvent) => void) => b.el.addEventListener(type, (e) => f(e as PointerEvent));
+  on('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id || (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 6)) return;
     drag.moved = true;
-    const cell = board.cellAt(e.clientX, e.clientY);
+    const cell = b.cellAt(e.clientX, e.clientY);
     if (cell < 0) return;
-    const s = ctrl.fleet[drag.i]!;
-    const len = FLEET[drag.i]!;
-    const r = Math.floor(cell / 10) - (s.vertical ? drag.offset : 0);
-    const c = (cell % 10) - (s.vertical ? 0 : drag.offset);
-    const want: Ship = { anchor: Math.max(0, r) * 10 + Math.max(0, c), vertical: s.vertical };
-    ghost = { i: drag.i, ship: shift(want, len, 0, 0) };
+    const v = ctrl.fleet[drag.i]!.vertical;
+    const r = Math.max(0, (cell - (cell % 10)) / 10 - (v ? drag.offset : 0));
+    const c = Math.max(0, (cell % 10) - (v ? 0 : drag.offset));
+    ghost = { i: drag.i, ship: shift(drag.i, { anchor: r * 10 + c, vertical: v }) };
     render();
-  };
-  const onUp = (e: PointerEvent) => {
-    if (!drag || e.pointerId !== drag.pointer) return;
+  });
+  on('pointerup', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
     const d = drag;
-    drag = null;
-    if (!d.moved) {
-      ghost = null;
-      rotate(d.i);
-      return;
-    }
-    if (ghost && legal(ghost)) {
-      commit(ghost.i, ghost.ship);
-      announce(`${SHIP_NAMES[ghost.i]} placed at ${cellName(ghost.ship.anchor)}.`);
-    } else {
-      announce("Can't place here.");
-      board.el.classList.add('snapback');
-      setTimeout(() => board.el.classList.remove('snapback'), 160);
-    }
-    ghost = null;
+    const g = ghost;
+    drag = ghost = null;
+    if (!d.moved) rotate(d.i);
+    else if (g) drop(g);
     render();
-  };
-  board.el.addEventListener('pointermove', onMove);
-  board.el.addEventListener('pointerup', onUp);
-  board.el.addEventListener('pointercancel', () => {
-    drag = null;
-    ghost = null;
+  });
+  on('pointercancel', () => {
+    drag = ghost = null;
     render();
   });
 
-  function rotate(i: number): void {
-    if (locked()) return;
-    const g = { i, ship: rotated(ctrl.fleet[i]!, FLEET[i]!) };
-    sel = i;
-    if (legal(g)) {
-      commit(i, g.ship);
-      announce(`${SHIP_NAMES[i]} ${g.ship.vertical ? 'vertical' : 'horizontal'}.`);
-    } else {
-      announce("Can't rotate here.");
-      render();
-    }
-  }
-
-  const dock = h('ul', { cls: 'dock', 'aria-label': 'Ships' });
-  const dockBtns = SHIP_NAMES.map((name, i) => {
-    const b = h(
+  const dockBtns = SHIP_NAMES.map((name, i) =>
+    h(
       'button',
       {
-        type: 'button',
         cls: 'dock-ship',
         'data-ship': i,
         onclick: (e: MouseEvent) => {
           if (locked()) return;
           sel = i;
-          if (e.detail === 0) {
-            // Keyboard: pick up / drop
-            if (ghost && ghost.i === i) drop();
-            else {
-              ghost = { i, ship: { ...ctrl.fleet[i]! } };
+          // Keyboard (detail 0): pick up / drop.
+          if (!e.detail) {
+            if (ghost?.i === i) {
+              if (drop(ghost)) ghost = null;
+            } else {
+              ghost = { i, ship: ctrl.fleet[i]! };
               announce(`${name} picked up. Arrows move, R rotates, Enter drops, Escape cancels.`);
             }
           }
           render();
         },
         onkeydown: (e: KeyboardEvent) => {
-          if (!ghost || ghost.i !== i) {
-            if (e.key === 'r' || e.key === 'R') {
-              e.preventDefault();
-              rotate(i);
-            }
-            return;
-          }
-          const len = FLEET[i]!;
           const k = e.key;
-          const mv: Record<string, [number, number]> = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
-          if (mv[k]) ghost = { i, ship: shift(ghost.ship, len, ...mv[k]!) };
-          else if (k === 'r' || k === 'R') ghost = { i, ship: rotated(ghost.ship, len) };
-          else if (k === 'Escape') {
+          const r = k === 'r' || k === 'R';
+          if (ghost?.i !== i) {
+            if (!r) return;
+            rotate(i);
+          } else if (MOVES[k] || r) {
+            ghost = { i, ship: shift(i, ghost.ship, ...(MOVES[k] ?? [0, 0]), r) };
+            announce(where(ghost) + (legal(ghost) ? '.' : ', blocked.'));
+          } else if (k === 'Escape') {
             ghost = null;
             announce('Cancelled.');
           } else return;
           e.preventDefault();
-          if (ghost) announce(`${cellName(ghost.ship.anchor)} ${ghost.ship.vertical ? 'vertical' : 'horizontal'}${legal(ghost) ? '' : ', blocked'}.`);
           render();
         },
       },
-      h('span', { cls: 'cap', style: `--len:${FLEET[i]}` }),
-      h('span', { cls: 'dock-name' }, name),
-      h('span', { cls: 'mono muted small' }, FLEET[i]),
-    );
-    dock.append(h('li', null, b));
-    return b;
-  });
+      h('span', { cls: 'cap-ship', style: `--len:${FLEET[i]}` }),
+      h('span', null, name),
+      h('span', 'mono muted small', FLEET[i]),
+    ),
+  );
 
-  function drop(): void {
-    if (!ghost) return;
-    if (legal(ghost)) {
-      commit(ghost.i, ghost.ship);
-      announce(`${SHIP_NAMES[ghost.i]} placed at ${cellName(ghost.ship.anchor)}.`);
-      ghost = null;
-    } else announce("Can't place here.");
-  }
-
-  const rules = h('p', { cls: 'small muted rules-line' });
-  const status = h('p', { cls: 'status-line', 'aria-live': 'off' });
-  const randomize = btn('Randomize', () => {
-    ghost = null;
-    ctrl.randomize();
-  }, { icon: 'dice', id: 'randomize' });
-  const rot = btn('Rotate', () => rotate(sel), { icon: 'rotate', id: 'rotate' });
-  const ready = btn('Ready', () => void ctrl.ready(), { primary: true, id: 'ready' });
+  const rules = h('p', 'small muted rules');
+  const status = h('p', 'status-line');
+  const randomize = btn('Randomize', () => ((ghost = null), ctrl.randomize()), '', 'randomize', 'dice');
+  const rot = btn('Rotate', () => rotate(sel), '', 'rotate', 'rotate');
+  const ready = btn('Ready', () => void ctrl.ready(), 'primary wide', 'ready');
 
   const el = h(
     'section',
-    { cls: 'screen placement' },
-    h('div', { cls: 'pl-head' }, label('Place your fleet'), rules),
-    h('div', { cls: 'pl-board' }, board.el),
+    'screen placement',
+    h('div', 'pl-head', label('Place your fleet'), rules),
+    b.el,
     h(
       'div',
-      { cls: 'pl-side' },
-      h('p', { cls: 'small muted hint' }, 'Drag ships to move them. Tap a ship to rotate it.'),
-      dock,
-      h('div', { cls: 'row-btns' }, randomize, rot),
+      'pl-side',
+      h('p', 'small muted hint', 'Drag ships to move them. Click a ship to rotate it.'),
+      h('ul', { cls: 'dock', 'aria-label': 'Ships' }, dockBtns.map((d) => h('li', null, d))),
+      h('div', 'row-btns', randomize, rot),
       ready,
       status,
     ),
@@ -204,33 +159,25 @@ export function placement(ctrl: Controller): Screen {
   function render(): void {
     const s = ctrl.state;
     if (s.s !== 'placement') return;
+    const me = s.ready.me;
     rules.textContent = rulesLine(ctrl.config);
-    const fleet = ctrl.fleet;
-    const cls: string[] = new Array(100).fill('');
-    const labels: string[] = [];
-    const occ = new Array<number>(100).fill(-1);
-    fleet.forEach((sh, i) => cellsOf(sh, i).forEach((c) => (occ[c] = i)));
-    for (let c = 0; c < 100; c++) labels.push(cellName(c) + (occ[c]! >= 0 ? ', ' + SHIP_NAMES[occ[c]!] : ''));
+    const occ: number[] = [];
     let ov = '';
-    fleet.forEach((sh, i) => {
-      const lifted = ghost?.i === i;
-      ov += capsule(sh, FLEET[i]!, 'own' + (lifted ? ' lifted' : '') + (i === sel && !locked() ? ' selected' : ''));
+    ctrl.fleet.forEach((sh, i) => {
+      cellsOf(sh, i).forEach((c) => (occ[c] = i));
+      ov += capsule(sh, i, 'own' + (ghost?.i === i ? ' lifted' : '') + (i === sel && !me ? ' selected' : ''));
     });
-    if (ghost) ov += capsule(ghost.ship, FLEET[ghost.i]!, 'ghost' + (legal(ghost) ? '' : ' bad'));
-    board.update({ cls, labels, overlay: ov });
-    dockBtns.forEach((b, i) => {
-      b.setAttribute('aria-pressed', String(i === sel));
-      b.classList.toggle('lifted', ghost?.i === i);
-      b.disabled = s.ready.me;
+    if (ghost) ov += capsule(ghost.ship, ghost.i, 'ghost' + (legal(ghost) ? '' : ' bad'));
+    b.update({ cls: [], labels: Array.from({ length: 100 }, (_, c) => cellName(c) + (occ[c] === undefined ? '' : ', ' + SHIP_NAMES[occ[c]!])), overlay: ov });
+    dockBtns.forEach((d, i) => {
+      d.setAttribute('aria-pressed', String(i === sel));
+      d.classList.toggle('lifted', ghost?.i === i);
+      d.disabled = me;
     });
-    randomize.disabled = rot.disabled = ready.disabled = s.ready.me;
-    ready.querySelector('span')!.textContent = s.ready.me ? 'Ready' : 'Ready';
+    randomize.disabled = rot.disabled = ready.disabled = me;
     status.replaceChildren(
-      s.ready.me
-        ? h('span', null, h('span', { cls: 'blink', 'aria-hidden': 'true' }), s.ready.them ? 'Starting…' : 'Waiting for opponent to place their fleet')
-        : s.ready.them
-          ? h('span', { id: 'opp-ready' }, 'Opponent ready')
-          : '',
+      me ? blink() : '',
+      me ? (s.ready.them ? 'Starting…' : 'Waiting for opponent to place their fleet') : s.ready.them ? h('span', { id: 'opp-ready' }, 'Opponent ready') : '',
     );
   }
   render();

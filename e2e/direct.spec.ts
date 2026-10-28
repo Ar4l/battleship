@@ -32,6 +32,13 @@ test.describe('direct-link fallback (offline-safe)', () => {
     await connectDirect(A, B, 'Salvo');
     await readyBoth(A, B);
     await expect(A.locator('#fire')).toBeVisible();
+    // Multi-shot results say who fired.
+    const first = (await waitTurn(A, B))!;
+    const other = first === A ? B : A;
+    for (const c of [0, 1, 2, 3, 4]) await first.locator(`.a-target .cell[data-i="${c}"]`).click();
+    await first.click('#fire');
+    await expect(first.locator('.strip-sub')).toHaveText(/^(You hit [A-J]\d+|You missed all 5|You sank)/);
+    await expect(other.locator('.strip-sub')).toHaveText(/^(They hit [A-J]\d+|They missed all 5|They sank)/);
     await playOut(A, B, B, 'salvo');
     await expect(B.locator('#result')).toHaveText('You won');
     await expect(A.locator('#verdict')).toHaveText('Fleet verified');
@@ -69,7 +76,10 @@ test.describe('direct-link fallback (offline-safe)', () => {
       await A.evaluate(() => ((window as any).__bs.state().match.energy.me = 6));
       await B.evaluate(() => ((window as any).__bs.state().match.energy.them = 6));
       await A.evaluate(() => (window as any).__bs.ctrl.emit());
+      // Picking an item must not shift the layout (desktop: the boards sit side by side).
+      const before = await A.locator('.a-own').boundingBox();
       await A.getByRole('button', { name: new RegExp('^' + name) }).click();
+      expect(await A.locator('.a-own').boundingBox()).toEqual(before);
       for (let i = 0; i < rot; i++) await A.click('#item-dir');
       await targetCell(A, cell).hover();
       await targetCell(A, cell).click();

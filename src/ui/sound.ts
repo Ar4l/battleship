@@ -1,33 +1,39 @@
 import type { Sfx } from '../app/controller';
 
-const KEY = 'bs:mute';
 let ctx: AudioContext | null = null;
-let master: GainNode | null = null;
-const store = (): Storage | null => {
+let out: GainNode;
+const get = (): Storage | null => {
   try {
     return localStorage;
   } catch {
     return null;
   }
 };
-let muted = store()?.getItem(KEY) === '1';
+let muted = get()?.getItem('bs:mute') === '1';
 
 export const isMuted = (): boolean => muted;
 export function setMuted(m: boolean): void {
   muted = m;
-  store()?.setItem(KEY, m ? '1' : '0');
+  get()?.setItem('bs:mute', m ? '1' : '0');
 }
 
 /** Create the AudioContext lazily on the first user gesture. */
 export function unlockAudio(): void {
   if (ctx || typeof AudioContext === 'undefined') return;
   ctx = new AudioContext();
-  master = ctx.createGain();
-  master.gain.value = 0.25;
-  master.connect(ctx.destination);
+  out = ctx.createGain();
+  out.gain.value = 0.25;
+  out.connect(ctx.destination);
 }
 
-function noise(dur: number, filter: BiquadFilterType, freq: number, at = 0, gain = 1): void {
+const gain = (v: number) => {
+  const g = ctx!.createGain();
+  g.gain.value = v;
+  g.connect(out);
+  return g;
+};
+
+function noise(dur: number, type: BiquadFilterType, freq: number, g = 1): void {
   const c = ctx!;
   const buf = c.createBuffer(1, Math.ceil(c.sampleRate * dur), c.sampleRate);
   const d = buf.getChannelData(0);
@@ -35,42 +41,31 @@ function noise(dur: number, filter: BiquadFilterType, freq: number, at = 0, gain
   const src = c.createBufferSource();
   src.buffer = buf;
   const f = c.createBiquadFilter();
-  f.type = filter;
+  f.type = type;
   f.frequency.value = freq;
-  const g = c.createGain();
-  g.gain.value = gain;
-  src.connect(f).connect(g).connect(master!);
-  src.start(c.currentTime + at);
+  src.connect(f).connect(gain(g));
+  src.start();
 }
 
-function tone(type: OscillatorType, from: number, to: number, dur: number, at = 0, gain = 0.6): void {
-  const c = ctx!;
-  const t = c.currentTime + at;
-  const o = c.createOscillator();
+function tone(type: OscillatorType, from: number, to: number, dur: number, at = 0, g = 0.6): void {
+  const t = ctx!.currentTime + at;
+  const o = ctx!.createOscillator();
+  const v = gain(g);
   o.type = type;
   o.frequency.setValueAtTime(from, t);
   o.frequency.exponentialRampToValueAtTime(to, t + dur);
-  const g = c.createGain();
-  g.gain.setValueAtTime(gain, t);
-  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-  o.connect(g).connect(master!);
+  v.gain.setValueAtTime(g, t);
+  v.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(v);
   o.start(t);
   o.stop(t + dur + 0.02);
 }
 
 export function play(s: Sfx): void {
-  if (muted || !ctx || !master) return;
-  if (ctx.state === 'suspended') void ctx.resume();
-  switch (s) {
-    case 'miss':
-      return noise(0.12, 'bandpass', 900);
-    case 'hit':
-      tone('sine', 110, 55, 0.18, 0, 0.9);
-      return noise(0.06, 'lowpass', 2000, 0, 0.6);
-    case 'sunk':
-      [440, 330, 220].forEach((f, i) => tone('triangle', f, f * 0.98, 0.12, i * 0.12, 0.5));
-      return;
-    case 'turn':
-      return tone('sine', 660, 660, 0.04, 0, 0.08 / 0.25);
-  }
+  if (muted || !ctx) return;
+  void ctx.resume();
+  if (s === 'miss') noise(0.12, 'bandpass', 900);
+  else if (s === 'hit') tone('sine', 110, 55, 0.18, 0, 0.9), noise(0.06, 'lowpass', 2000, 0.6);
+  else if (s === 'sunk') [440, 330, 220].forEach((f, i) => tone('triangle', f, f * 0.98, 0.12, i * 0.12, 0.5));
+  else tone('sine', 660, 660, 0.04, 0, 0.32);
 }

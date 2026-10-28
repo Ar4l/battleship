@@ -6,105 +6,98 @@ import { icon, type IconName } from './icons';
 export interface Screen {
   el: HTMLElement;
   update?(): void;
-  destroy?(): void;
 }
 
-export function btn(label: Child, onClick: (e: MouseEvent) => void, o: { primary?: boolean; icon?: IconName; disabled?: boolean; cls?: string; id?: string; quiet?: boolean } = {}): HTMLButtonElement {
-  return h(
-    'button',
-    { type: 'button', cls: `btn${o.primary ? ' primary' : ''}${o.quiet ? ' quiet' : ''}${o.cls ? ' ' + o.cls : ''}`, onclick: onClick, disabled: o.disabled, id: o.id },
-    o.icon ? icon(o.icon) : null,
-    h('span', null, label),
-  );
-}
+/** `cls` adds to "btn", e.g. "primary", "quiet", "wide". */
+export const btn = (text: Child, onclick: () => void, cls = '', id?: string, ic?: IconName): HTMLButtonElement =>
+  h('button', { cls: 'btn ' + cls, onclick, id }, ic && icon(ic), h('span', null, text));
 
-export const label = (text: string, attrs: Record<string, unknown> = {}) => h('div', { cls: 'label', ...attrs }, text);
+export const label = (text: string) => h('div', 'label', text);
+export const blink = () => h('span', { cls: 'blink', 'aria-hidden': 'true' });
+export const status = (text: string) => h('p', 'status-line', blink(), text);
 
-/** Copy text; temporarily shows "Copied". */
+/** Copy text; briefly shows "Copied". */
 export function copyBtn(get: () => string, text = 'Copy link', id?: string): HTMLButtonElement {
-  const b = btn(text, async () => {
-    try {
-      await navigator.clipboard.writeText(get());
-    } catch {
-      const ta = h('textarea', { value: get(), cls: 'sr-only' });
-      document.body.append(ta);
-      ta.select();
-      document.execCommand('copy');
-      ta.remove();
-    }
-    const span = b.querySelector('span')!;
+  const done = () => {
     span.textContent = 'Copied';
     setTimeout(() => (span.textContent = text), 1500);
-  }, { icon: 'copy', id });
+  };
+  const b = btn(
+    text,
+    () =>
+      void navigator.clipboard.writeText(get()).then(done, () => {
+        const ta = h('textarea', { value: get(), cls: 'sr-only' });
+        document.body.append(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+        done();
+      }),
+    '',
+    id,
+    'copy',
+  );
+  const span = b.lastChild as HTMLElement;
   return b;
 }
 
-export function shareBtn(get: () => string, title = 'Battleship'): HTMLButtonElement | null {
-  if (!('share' in navigator)) return null;
-  return btn('Share', () => void navigator.share({ title, url: get() }).catch(() => {}), { icon: 'share' });
-}
+export const shareBtn = (get: () => string) =>
+  'share' in navigator && btn('Share', () => void navigator.share({ title: 'Battleship', url: get() }).catch(() => {}), '', undefined, 'share');
 
-export const linkBox = (text: string, id?: string) => h('div', { cls: 'linkbox mono', id, tabindex: 0, 'aria-label': 'Link' }, text);
+export const linkBox = (text: string, id?: string, cls = '') => h('div', { cls: 'linkbox mono ' + cls, id, tabindex: 0 }, text);
 
 let segN = 0;
 /** Segmented control built on native radios (keyboard behaviour for free). */
-export function segmented<T extends string | number>(name: string, opts: { v: T; label: string }[], value: T, onChange: (v: T) => void): HTMLElement {
+function segmented<T>(name: string, opts: [T, string][], value: T, onChange: (v: T) => void): HTMLElement {
   const group = 'seg' + ++segN;
   return h(
     'div',
     { cls: 'seg', role: 'radiogroup', 'aria-label': name },
-    opts.map((o) =>
-      h('label', null, h('input', { type: 'radio', name: group, checked: o.v === value, onchange: () => onChange(o.v) }), h('span', null, o.label)),
-    ),
+    opts.map(([v, text]) => h('label', null, h('input', { type: 'radio', name: group, checked: v === value, onchange: () => onChange(v) }), h('span', null, text))),
   );
 }
 
-export function toggle(text: string, checked: boolean, onChange: (v: boolean) => void, disabled = false): HTMLElement {
-  return h(
+const toggle = (text: string, checked: boolean, onChange: (v: boolean) => void, disabled = false) =>
+  h(
     'label',
-    { cls: 'toggle' + (disabled ? ' off' : '') },
+    'toggle',
     h('input', { type: 'checkbox', role: 'switch', checked, disabled, onchange: (e: Event) => onChange((e.target as HTMLInputElement).checked) }),
     h('span', { cls: 'track', 'aria-hidden': 'true' }),
     h('span', null, text),
   );
-}
 
-const MODE_DESC = [
-  'One shot per turn.',
-  'Fire one shot for each ship you have left.',
-  'Earn energy each turn and spend it on sonar, torpedoes and bombs.',
-];
+const MODE_DESC = ['One shot per turn.', 'Fire one shot for each ship you have left.', 'Earn energy each turn and spend it on sonar, torpedoes and bombs.'];
 
 /** Mode, toggles and timer. Calls onChange with a partial config. */
 export function settings(c: Config, onChange: (p: Partial<Config>) => void): HTMLElement {
-  const wrap = h('div', { cls: 'settings' });
-  const render = () => {
+  const wrap = h('div', 'settings');
+  const set = (p: Partial<Config>, redraw = false) => {
+    c = { ...c, ...p };
+    onChange(p);
+    if (redraw) render();
+  };
+  const render = () =>
     wrap.replaceChildren(
       h(
         'div',
-        { cls: 'field-row' },
-        label('Mode', { id: 'lbl-mode' }),
-        segmented('Mode', MODE_NAMES.map((n, i) => ({ v: i as Mode, label: n })), c.mode, (v) => {
-          c = { ...c, mode: v, extraShot: v === 0 ? c.extraShot : false };
-          onChange({ mode: v });
-          render();
-        }),
-        h('p', { cls: 'small muted' }, MODE_DESC[c.mode]),
+        'opt',
+        label('Mode'),
+        segmented('Mode', MODE_NAMES.map((n, i) => [i as Mode, n]), c.mode, (mode) => set({ mode, extraShot: false }, true)),
+        h('p', 'small muted', MODE_DESC[c.mode]),
       ),
       h(
         'div',
-        { cls: 'field-row toggles' },
-        toggle('Extra shot after a hit', c.extraShot, (v) => onChange({ extraShot: v }), c.mode !== 0),
-        toggle("Ships can't touch", c.noTouch, (v) => onChange({ noTouch: v })),
+        null,
+        toggle('Extra shot after a hit', c.extraShot, (extraShot) => set({ extraShot }), c.mode > 0),
+        toggle("Ships can't touch", c.noTouch, (noTouch) => set({ noTouch })),
       ),
       h(
         'div',
-        { cls: 'field-row' },
+        'opt',
         label('Turn timer'),
-        segmented('Turn timer', TIMERS.map((t) => ({ v: t, label: t ? `${t} s` : 'Off' })), c.timer, (v: Timer) => onChange({ timer: v })),
+        segmented('Turn timer', TIMERS.map((t) => [t, t ? t + ' s' : 'Off']), c.timer, (timer: Timer) => set({ timer })),
       ),
     );
-  };
   render();
   return wrap;
 }

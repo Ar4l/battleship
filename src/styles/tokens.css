@@ -6,8 +6,6 @@
   --rule: #c9cfd6;
   --known: #e3ebef;
   --signal: #d9480f;
-  --focus: #0e1a2b;
-  --sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --cell: clamp(24px, calc((min(100vw, 480px) - 64px) / 10), 40px);
   --gutter: 16px;
@@ -22,12 +20,5 @@
     --rule: #2a3a52;
     --known: #1b2e47;
     --signal: #ff6a1f;
-    --focus: #f4f1ea;
-  }
-}
-@media (min-width: 900px) {
-  :root {
-    --cell: 40px;
-    --gutter: 32px;
   }
 }

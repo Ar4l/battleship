@@ -3,12 +3,11 @@ import type { Ship } from '../game/types';
 import { h } from './h';
 
 export interface BoardOpts {
-  label: string;
-  interactive: boolean;
+  /** Makes the cells buttons with a roving tabindex. */
   onActivate?(cell: number, touch: boolean): void;
   onHover?(cell: number | null): void;
   /** Return true when handled. */
-  onKey?(e: KeyboardEvent, cell: number): boolean;
+  onKey?(e: KeyboardEvent): boolean;
   onPointerDown?(cell: number, e: PointerEvent): void;
 }
 
@@ -21,189 +20,125 @@ export interface BoardModel {
   overlay: string;
 }
 
+export interface Board {
+  el: HTMLElement;
+  cells: HTMLElement[];
+  focused(): number;
+  update(m: BoardModel): void;
+  /** Cell under a client point, or -1 when off the board. */
+  cellAt(x: number, y: number): number;
+}
+
 const COLS = 'ABCDEFGHIJ';
+const span = (s: string | number) => `<span>${s}</span>`;
 
 /** A 10×10 board with persistent cells (focus and pointer capture survive updates). */
-export class Board {
-  el: HTMLElement;
-  cells: HTMLElement[] = [];
-  private grid: HTMLElement;
-  private ov: SVGSVGElement;
-  focusIdx = 0;
-  private lastTouch = false;
-
-  constructor(private o: BoardOpts) {
-    this.grid = h('div', { cls: 'cells', role: 'grid', 'aria-label': o.label, 'aria-readonly': o.interactive ? undefined : 'true' });
-    for (let r = 0; r < 10; r++) {
-      const row = h('div', { role: 'row', cls: 'row' });
-      for (let c = 0; c < 10; c++) {
-        const i = r * 10 + c;
-        const inner = o.interactive
-          ? h('button', { type: 'button', cls: 'cell', tabindex: i === 0 ? 0 : -1, 'data-i': i })
-          : h('span', { cls: 'cell', 'data-i': i });
-        this.cells.push(inner);
-        row.append(h('div', { role: 'gridcell', cls: 'gc' }, inner));
-      }
-      this.grid.append(row);
-    }
-    this.ov = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    this.ov.setAttribute('viewBox', '0 0 10 10');
-    this.ov.setAttribute('class', 'ov');
-    this.ov.setAttribute('aria-hidden', 'true');
-    this.el = h(
-      'div',
-      { cls: 'board' },
-      h('div', { cls: 'corner', 'aria-hidden': 'true' }),
-      h('div', { cls: 'colh', 'aria-hidden': 'true' }, [...COLS].map((ch) => h('span', null, ch))),
-      h('div', { cls: 'rowh', 'aria-hidden': 'true' }, Array.from({ length: 10 }, (_, i) => h('span', null, i + 1))),
-      h('div', { cls: 'field' }, this.grid, this.ov),
-    );
-    const idx = (e: Event): number => {
-      const t = (e.target as HTMLElement).closest?.('[data-i]');
-      return t ? +(t as HTMLElement).dataset.i! : -1;
-    };
-    this.grid.addEventListener('pointerdown', (e) => {
-      this.lastTouch = e.pointerType !== 'mouse';
-      const i = idx(e);
-      if (i >= 0) o.onPointerDown?.(i, e);
+export function board(label: string, mini: boolean, o: BoardOpts = {}): Board {
+  const live = !!o.onActivate;
+  let rows = '';
+  for (let i = 0; i < 100; i++)
+    rows +=
+      (i % 10 ? '' : '<div role="row" class="row">') +
+      `<div role="gridcell" class="gc">${live ? `<button class="cell" tabindex="${i ? -1 : 0}" data-i="${i}"></button>` : `<span class="cell" data-i="${i}"></span>`}</div>` +
+      (i % 10 === 9 ? '</div>' : '');
+  const el = h('div', { cls: 'board' + (mini ? ' mini' : '') });
+  el.innerHTML =
+    `<div></div><div class="colh" aria-hidden="true">${[...COLS].map(span).join('')}</div><div class="rowh" aria-hidden="true">${[...COLS].map((_, i) => span(i + 1)).join('')}</div>` +
+    `<div class="field"><div class="cells" role="grid" aria-label="${label}"${live ? '' : ' aria-readonly="true"'}>${rows}</div><svg class="ov" viewBox="0 0 10 10" aria-hidden="true"></svg></div>`;
+  const grid = el.querySelector<HTMLElement>('.cells')!;
+  const ov = el.querySelector('svg')!;
+  const cells = [...grid.querySelectorAll<HTMLElement>('.cell')];
+  let focus = 0;
+  let touch = false;
+  const idx = (e: Event): number => {
+    const t = (e.target as HTMLElement).closest?.<HTMLElement>('[data-i]');
+    return t ? +t.dataset.i! : -1;
+  };
+  const setFocus = (i: number, move = false) => {
+    cells[focus]!.tabIndex = -1;
+    cells[(focus = i)]!.tabIndex = 0;
+    if (move) cells[i]!.focus();
+  };
+  const on = (type: string, f: (e: PointerEvent & KeyboardEvent, i: number) => unknown) =>
+    grid.addEventListener(type, (e) => f(e as PointerEvent & KeyboardEvent, idx(e)));
+  on('pointerdown', (e, i) => {
+    touch = e.pointerType !== 'mouse';
+    if (i >= 0) o.onPointerDown?.(i, e);
+  });
+  if (live) {
+    on('click', (e, i) => {
+      if (i < 0) return;
+      setFocus(i);
+      // Keyboard "clicks" have detail 0.
+      o.onActivate!(i, e.detail > 0 && touch);
     });
-    if (o.interactive) {
-      this.grid.addEventListener('click', (e) => {
-        const i = idx(e);
-        if (i < 0) return;
-        this.setFocus(i, false);
-        // Keyboard "clicks" have detail 0.
-        o.onActivate?.(i, (e as MouseEvent).detail > 0 && this.lastTouch);
-      });
-      this.grid.addEventListener('pointerover', (e) => {
-        if (e.pointerType === 'mouse') {
-          const i = idx(e);
-          if (i >= 0) o.onHover?.(i);
-        }
-      });
-      this.grid.addEventListener('pointerleave', (e) => e.pointerType === 'mouse' && o.onHover?.(null));
-      this.grid.addEventListener('focusin', (e) => {
-        const i = idx(e);
-        if (i >= 0) {
-          this.focusIdx = i;
-          if (!this.lastTouch) o.onHover?.(i);
-        }
-      });
-      this.grid.addEventListener('keydown', (e) => this.key(e));
-    }
-  }
-
-  private key(e: KeyboardEvent): void {
-    const i = this.focusIdx;
-    if (this.o.onKey?.(e, i)) return e.preventDefault();
-    const r = Math.floor(i / 10);
-    const c = i % 10;
-    let n = -1;
-    switch (e.key) {
-      case 'ArrowUp':
-        n = r > 0 ? i - 10 : i;
-        break;
-      case 'ArrowDown':
-        n = r < 9 ? i + 10 : i;
-        break;
-      case 'ArrowLeft':
-        n = c > 0 ? i - 1 : i;
-        break;
-      case 'ArrowRight':
-        n = c < 9 ? i + 1 : i;
-        break;
-      case 'Home':
-        n = e.ctrlKey ? 0 : r * 10;
-        break;
-      case 'End':
-        n = e.ctrlKey ? 99 : r * 10 + 9;
-        break;
-    }
-    if (n >= 0) {
+    on('pointerover', (e, i) => e.pointerType === 'mouse' && i >= 0 && o.onHover?.(i));
+    on('pointerleave', (e) => e.pointerType === 'mouse' && o.onHover?.(null));
+    on('focusin', (_, i) => {
+      if (i < 0) return;
+      focus = i;
+      if (!touch) o.onHover?.(i);
+    });
+    on('keydown', (e, i) => {
+      if (o.onKey?.(e)) return e.preventDefault();
+      const r = i - (i % 10);
+      const n = { ArrowUp: i < 10 ? i : i - 10, ArrowDown: i > 89 ? i : i + 10, ArrowLeft: i === r ? i : i - 1, ArrowRight: i === r + 9 ? i : i + 1, Home: e.ctrlKey ? 0 : r, End: e.ctrlKey ? 99 : r + 9 }[e.key];
+      if (n === undefined) return;
       e.preventDefault();
-      this.lastTouch = false;
-      this.setFocus(n, true);
-    }
+      touch = false;
+      setFocus(n, true);
+    });
   }
-
-  setFocus(i: number, move: boolean): void {
-    this.cells[this.focusIdx]?.setAttribute('tabindex', '-1');
-    this.focusIdx = i;
-    const el = this.cells[i]!;
-    el.setAttribute('tabindex', '0');
-    if (move) el.focus();
-  }
-
-  update(m: BoardModel): void {
-    for (let i = 0; i < 100; i++) {
-      const el = this.cells[i]!;
-      const cls = 'cell' + (m.cls[i] ? ' ' + m.cls[i] : '');
-      if (el.className !== cls) el.className = cls;
-      if (this.o.interactive) {
-        if (el.getAttribute('aria-label') !== m.labels[i]) el.setAttribute('aria-label', m.labels[i]!);
-      } else if (el.textContent !== m.labels[i]) el.textContent = m.labels[i]!;
-    }
-    this.ov.innerHTML = m.overlay;
-  }
-
-  /** Cell under a client point, or -1 when off the board. */
-  cellAt(x: number, y: number): number {
-    const r = this.grid.getBoundingClientRect();
-    const c = Math.floor(((x - r.left) / r.width) * 10);
-    const row = Math.floor(((y - r.top) / r.height) * 10);
-    return c < 0 || c > 9 || row < 0 || row > 9 ? -1 : row * 10 + c;
-  }
+  return {
+    el,
+    cells,
+    focused: () => focus,
+    update(m) {
+      cells.forEach((c, i) => {
+        const cls = 'cell ' + (m.cls[i] ?? '');
+        if (c.className !== cls) c.className = cls;
+        const l = m.labels[i]!;
+        if (live) c.getAttribute('aria-label') !== l && c.setAttribute('aria-label', l);
+        else if (c.textContent !== l) c.textContent = l;
+      });
+      ov.innerHTML = m.overlay;
+    },
+    cellAt(x, y) {
+      const r = grid.getBoundingClientRect();
+      const c = Math.floor(((x - r.left) / r.width) * 10);
+      const row = Math.floor(((y - r.top) / r.height) * 10);
+      return c < 0 || c > 9 || row < 0 || row > 9 ? -1 : row * 10 + c;
+    },
+  };
 }
 
 // ---------- SVG overlay builders (units: 1 = one cell) ----------
 
-const xy = (cell: number) => [cell % 10, Math.floor(cell / 10)] as const;
+const x = (c: number) => c % 10;
+const y = (c: number) => (c - (c % 10)) / 10;
+const rect = (cls: string, x0: number, y0: number, w: number, hh: number, extra = '') =>
+  `<rect class="${cls}" x="${x0}" y="${y0}" width="${w}" height="${hh}"${extra}/>`;
+const square = (cls: string, c: number, inset: number, extra = '') => rect(cls, x(c) + inset, y(c) + inset, 1 - 2 * inset, 1 - 2 * inset, extra);
+const dot = (cls: string, c: number, r: number, extra = '') => `<circle class="${cls}"${extra} cx="${x(c) + 0.5}" cy="${y(c) + 0.5}" r="${r}"/>`;
+const delay = (ms: number) => (ms ? ` style="animation-delay:${ms}ms"` : '');
 
-export function capsule(ship: Ship, len: number, cls: string): string {
-  const [x, y] = xy(ship.anchor);
+/** Ship outline; `round` draws a capsule. */
+export function shipRect(ship: Ship, len: number, cls: string, inset: number, round = true): string {
+  const c = ship.anchor;
   const w = ship.vertical ? 1 : len;
   const hh = ship.vertical ? len : 1;
-  const inset = 0.14;
-  return `<rect class="${cls}" x="${x + inset}" y="${y + inset}" width="${w - 2 * inset}" height="${hh - 2 * inset}" rx="${0.5 - inset}"/>`;
+  return rect(cls, x(c) + inset, y(c) + inset, w - 2 * inset, hh - 2 * inset, round ? ` rx="${0.5 - inset}"` : ' pathLength="100"');
 }
+export const capsule = (ship: Ship, i: number, cls: string) => shipRect(ship, FLEET[i]!, cls, 0.14);
 
-export function shipRect(ship: Ship, len: number, cls: string, inset = 0): string {
-  const [x, y] = xy(ship.anchor);
-  const w = ship.vertical ? 1 : len;
-  const hh = ship.vertical ? len : 1;
-  return `<rect class="${cls}" x="${x + inset}" y="${y + inset}" width="${w - 2 * inset}" height="${hh - 2 * inset}" pathLength="100"/>`;
-}
-
-export function miss(cell: number, anim: boolean, delay = 0): string {
-  const [x, y] = xy(cell);
-  const st = delay ? ` style="animation-delay:${delay}ms"` : '';
-  return `<circle class="miss" cx="${x + 0.5}" cy="${y + 0.5}" r=".14"/>` + (anim ? `<circle class="ring"${st} cx="${x + 0.5}" cy="${y + 0.5}" r=".36"/>` : '');
-}
-
-export function hit(cell: number, anim: boolean, delay = 0): string {
-  const [x, y] = xy(cell);
-  const st = delay ? ` style="animation-delay:${delay}ms"` : '';
-  return `<rect class="hit${anim ? ' pop' : ''}"${st} x="${x + 0.18}" y="${y + 0.18}" width=".64" height=".64"/>`;
-}
-
-export function knownDot(cell: number): string {
-  const [x, y] = xy(cell);
-  return `<circle class="kdot" cx="${x + 0.5}" cy="${y + 0.5}" r=".07"/>`;
-}
-
-export function last(cell: number): string {
-  const [x, y] = xy(cell);
-  return `<rect class="last" x="${x + 0.07}" y="${y + 0.07}" width=".86" height=".86"/>`;
-}
-
-export function sunk(ship: Ship, i: number, anim: boolean): string {
-  const len = FLEET[i]!;
-  return shipRect(ship, len, 'hatch' + (anim ? ' fade' : ''), 0.04) + shipRect(ship, len, 'sunk' + (anim ? ' draw' : ''), 0.04);
-}
-
-export function sonarBox(a: number, count: number): string {
-  const [x, y] = xy(a);
-  return `<rect class="sonar" x="${x - 1 + 0.04}" y="${y - 1 + 0.04}" width="2.92" height="2.92"/><text class="sonar-n" x="${x - 1 + 0.14}" y="${y - 1 + 0.5}">${count}</text>`;
-}
+/** `anim` is the stagger delay in ms, or -1 for no animation. */
+export const miss = (c: number, anim = -1) => dot('miss', c, 0.14) + (anim < 0 ? '' : dot('ring', c, 0.36, delay(anim)));
+export const hit = (c: number, anim = -1) => square('hit' + (anim < 0 ? '' : ' pop'), c, 0.18, delay(anim));
+export const knownDot = (c: number) => dot('kdot', c, 0.07);
+export const last = (c: number) => square('last', c, 0.07);
+export const sunk = (ship: Ship, i: number, anim: boolean) =>
+  shipRect(ship, FLEET[i]!, 'hatch' + (anim ? ' fade' : ''), 0.04, false) + shipRect(ship, FLEET[i]!, 'sunk' + (anim ? ' draw' : ''), 0.04, false);
+export const sonarBox = (a: number, count: number) =>
+  rect('sonar', x(a) - 0.96, y(a) - 0.96, 2.92, 2.92) + `<text class="sonar-n" x="${x(a) - 0.86}" y="${y(a) - 0.5}">${count}</text>`;
 
 export const cellsOf = (ship: Ship, i: number): number[] => shipCells(ship, FLEET[i]!) ?? [];

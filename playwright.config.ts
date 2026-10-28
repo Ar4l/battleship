@@ -13,12 +13,13 @@ export default defineConfig({
   reporter: [['list']],
   grepInvert: NO_NET ? /@net/ : undefined,
   use: {
-    baseURL: 'http://localhost:4173/battleship/',
+    baseURL: 'http://localhost:4174/battleship/',
     trace: 'retain-on-failure',
   },
+  // Its own outDir and port, so a concurrent `vite build` into dist/ can't change files under a running test.
   webServer: {
-    command: 'npx vite build && npx vite preview --port 4173 --strictPort',
-    url: 'http://localhost:4173/battleship/',
+    command: 'npx vite build --outDir dist-e2e && npx vite preview --outDir dist-e2e --port 4174 --strictPort',
+    url: 'http://localhost:4174/battleship/',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },

@@ -11,7 +11,7 @@ Everything below has been decided. Where research offered alternatives, this pla
 | Topic | Decision | Why |
 |---|---|---|
 | UI | Vanilla TS with a 20-line `h()` DOM helper. No framework. | Bundle size |
-| Signaling | Trystero **Nostr** (`trystero@0.26.0`, pinned exactly), loaded lazily | Many independent relay operators, 5-way redundancy, and the README ranks it first. It costs 4.3 KB gz more than torrent, and one of torrent's default trackers is already dead. |
+| Signaling | Trystero **torrent** (`@trystero-p2p/torrent@0.26.0`, pinned exactly), loaded lazily, with four live trackers. Unused Trystero modules are trimmed at build time (`build/trystero/`). | About 4.5 KB gz smaller than Nostr and matched peers about twice as fast in testing. The trims save another 6.4 KB gz. Originally planned as Nostr; switched during the size work. |
 | Game transport | Our **own negotiated RTCDataChannel** (`label 'g'`, `negotiated: true`, `id: 512`), carrying binary frames | The same code path serves Trystero and the manual fallback. A shot is 2 bytes and skips Trystero's 36-byte header. |
 | Fallback | Manual SDP exchanged through two links, using non-trickle ICE and a packed SDP blob (~118 chars) | Verified working in headless Chromium (`/tmp/sdp-test/page.js`) |
 | ICE | Public STUN only: `stun:stun.l.google.com:19302`, `stun:stun1.l.google.com:19302`, `stun:stun.cloudflare.com:3478` | The spec requires public STUN only |
@@ -150,9 +150,11 @@ room = joinRoom({ appId: 'aral.cc-battleship',
     - If the remote is a host with `busy:true`, go to `notice('room-full')`, run `setTimeout(() => room.leave())`, and throw. Leaving immediately is required to stop the tight retry loop on Nostr.
     - If the remote is a host that is not busy, accept.
     - If the remote is another guest (two guests waiting on a code that has no host yet), **accept but ignore** the peer, which stays idle. Rejecting would cause a tight retry loop. Once the real host arrives, call `getPeers()[idleId].close()`.
-- `onPeerJoin(id)`: if `id === reserved` (host) or the peer is the host (guest), set `opponent = id`. Then both sides run `pc = room.getPeers()[id]` and `dc = pc.createDataChannel('g', {negotiated:true, id:512})` with `binaryType='arraybuffer'`, and wrap it in a Transport. When the channel opens, both send HELLO (§5).
+- `onPeerJoin(id)`: if `id === reserved` (host) or the peer is the host (guest), set `opponent = id`. Then both sides run `pc = room.getPeers()[id]` and `dc = pc.createDataChannel('g', {negotiated:true, id:512})` with `binaryType='arraybuffer'`, and wrap it in a Transport. When the channel opens, both send HELLO (§5) and repeat it every 250 ms until any frame arrives, because a message sent before the other side has created channel 512 is silently dropped. The guest answers every HELLO with a HELLO. If no CONFIG/placement within 6 s, go to `notice('failed')`.
 - `onPeerLeave(id === opponent)` maps to `notice('left')`.
 - Keep the room open for the whole session, because `leave()` closes the peer connections. Call `room.leave()` only on BYE, when the user leaves, or on `pagehide`.
+- Once the channel opens, call `pauseRelayReconnection()` and close the tracker sockets: all of them on the guest, all but one open socket on the host (so a third player still hears "room full"). `openRoom` calls `resumeRelayReconnection()` before joining.
+- A peer that fails its handshake or leaves before the channel opens clears `reserved`/`opponent`, so the room unlocks for the next guest.
 - **Timeouts:**
   - Host after 6 s: if `getRelaySockets()` reports no socket in `readyState === 1`, set `net:'relays-down'` and show the direct-link panel prominently ("Can't reach the matchmaking network. Use a direct link instead."). Otherwise, wait for the friend indefinitely. A link reading "Trouble connecting? Use a direct link" is always visible.
   - Guest after 10 s with no host handshake: set `slow:true`. The guest sees "Still looking for game 4821. Check the code, or ask your friend for a direct link." with a Retry button. The guest keeps listening in the background.
@@ -494,16 +496,16 @@ applyAnswer(m, answer): { m, events: UiEvent[] } | { cheat: string }
 
 ## 12. Bundle budget (enforced by `npm run size` in CI and before deploy)
 
-| Asset | Budget (gzip -9) |
-|---|---|
-| `index.html` with inlined CSS | ≤ 3.5 KB |
-| app JS (entry chunk: game + proto + ui + direct fallback) | ≤ 9 KB |
-| trystero chunk (lazy) | ≤ 28.5 KB (measured 27.6) |
-| **Total** | **≤ 40 KB hard, 37 KB target** |
-| First load before any intent | ≤ 12.5 KB |
+| Asset | Budget (gzip -9) | Measured |
+|---|---|---|
+| `index.html` with inlined CSS | ≤ 5 KB | 5.0 KB |
+| app JS (entry chunk: game + proto + ui + room) | ≤ 19 KB | 18.6 KB |
+| Trystero chunk (lazy, trimmed) | ≤ 16 KB | 15.6 KB |
+| direct-link chunks (lazy: SDP packing, fallback flows and screens) | ≤ 4.5 KB | 4.0 KB |
+| **Code game total (html + entry + Trystero)** | **≤ 40 KB hard** | **39.2 KB** |
 
+- The first plan (9 KB entry, 37 KB target) underestimated the UI and anti-cheat code. Instead of raising the budget, the Trystero chunk was trimmed from 22.0 KB to 15.6 KB (`build/trystero/`: no media, no public actions, a one-frame JSON wire for internal messages, no room-password challenge), Vite's preload helper was replaced by a pass-through, the CSS was merged and deduplicated, and the game, protocol and UI modules were rewritten more compactly.
 - No fonts, images or audio files. The favicon is an inline SVG data URI.
-- If the total goes over budget, switch `net/room.ts` to `@trystero-p2p/torrent` with `relayConfig.urls` set to the three live trackers (open.ftorrent.com, tracker.webtorrent.dev, tracker.openwebtorrent.com). That saves 4.4 KB. Do not trim features first.
 - `scripts/size.mjs` prints a table and exits 1 on any breach.
 
 ---

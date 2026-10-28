@@ -1,24 +1,8 @@
 import { decodeFleet, decodeShip, encodeFleet, encodeShip } from '../game/board';
 import { decodeConfig, encodeConfig } from '../game/rules';
-import type { Answer, Attack, Config, Entry, Fleet, ItemId } from '../game/types';
+import type { Config, Entry, Fleet, ItemId } from '../game/types';
 
 export const PROTO_VERSION = 1;
-export const MAX_FRAME = 65; // READY is the largest frame
-
-export const OP = {
-  HELLO: 0x01,
-  CONFIG: 0x02,
-  READY: 0x03,
-  COIN: 0x04,
-  FIRE: 0x10,
-  ANSWER: 0x11,
-  USE: 0x12,
-  SONAR: 0x13,
-  REVEAL: 0x20,
-  VERDICT: 0x21,
-  REMATCH: 0x30,
-  BYE: 0x31,
-} as const;
 
 export type Msg =
   | { t: 'hello'; ver: number; role: 0 | 1 }
@@ -34,112 +18,68 @@ export type Msg =
   | { t: 'rematch'; config?: Config }
   | { t: 'bye' };
 
+/** Opcode per message type; one byte, then the body. */
+const OP = { hello: 1, config: 2, ready: 3, coin: 4, fire: 16, answer: 17, use: 18, sonar: 19, reveal: 32, verdict: 33, rematch: 48, bye: 49 } as const;
+
 export function encode(m: Msg): Uint8Array {
-  const b = (...xs: (number | ArrayLike<number>)[]): Uint8Array => {
-    const out: number[] = [];
-    for (const x of xs) typeof x === 'number' ? out.push(x) : out.push(...Array.from(x));
-    return Uint8Array.from(out);
-  };
-  switch (m.t) {
-    case 'hello':
-      return b(OP.HELLO, m.ver, m.role);
-    case 'config':
-      return b(OP.CONFIG, encodeConfig(m.config));
-    case 'ready':
-      return b(OP.READY, m.board, m.coin);
-    case 'coin':
-      return b(OP.COIN, m.nonce);
-    case 'fire':
-      return b(OP.FIRE, m.cells);
-    case 'answer':
-      return b(OP.ANSWER, ...m.entries.flatMap((e) => (e.code >= 2 ? [e.cell, e.code, encodeShip(e.ship!)] : [e.cell, e.code])));
-    case 'use':
-      return b(OP.USE, m.item, m.a, m.b);
-    case 'sonar':
-      return b(OP.SONAR, m.count);
-    case 'reveal':
-      return b(OP.REVEAL, m.salt, encodeFleet(m.fleet));
-    case 'verdict':
-      return b(OP.VERDICT, m.ok ? 1 : 0);
-    case 'rematch':
-      return m.config ? b(OP.REMATCH, encodeConfig(m.config)) : b(OP.REMATCH);
-    case 'bye':
-      return b(OP.BYE);
-  }
+  const body: ArrayLike<number>[] =
+    m.t === 'hello' ? [[m.ver, m.role]]
+    : m.t === 'config' || m.t === 'rematch' ? (m.config ? [encodeConfig(m.config)] : [])
+    : m.t === 'ready' ? [m.board, m.coin]
+    : m.t === 'coin' ? [m.nonce]
+    : m.t === 'fire' ? [m.cells]
+    : m.t === 'answer' ? m.entries.map((e) => (e.code > 1 ? [e.cell, e.code, encodeShip(e.ship!)] : [e.cell, e.code]))
+    : m.t === 'use' ? [[m.item, m.a, m.b]]
+    : m.t === 'sonar' ? [[m.count]]
+    : m.t === 'reveal' ? [m.salt, encodeFleet(m.fleet)]
+    : m.t === 'verdict' ? [[+m.ok]]
+    : [];
+  return Uint8Array.from([OP[m.t], ...body.flatMap((p) => Array.from(p))]);
 }
 
+/** null for anything malformed. */
 export function decode(u: Uint8Array): Msg | null {
   const n = u.length;
-  if (n < 1 || n > MAX_FRAME) return null;
-  const at = (i: number) => u[i]!;
-  switch (at(0)) {
-    case OP.HELLO:
-      return n === 3 && at(2) <= 1 ? { t: 'hello', ver: at(1), role: at(2) as 0 | 1 } : null;
-    case OP.CONFIG: {
-      const config = n === 4 ? decodeConfig(at(1), at(2), at(3)) : null;
-      return config ? { t: 'config', config } : null;
-    }
-    case OP.READY:
-      return n === 65 ? { t: 'ready', board: u.slice(1, 33), coin: u.slice(33, 65) } : null;
-    case OP.COIN:
+  const [op, a = 0, b = 0, c = 0] = u;
+  const config = n === 4 ? decodeConfig(a, b, c) : null;
+  switch (op) {
+    case OP.hello:
+      return n === 3 && b < 2 ? { t: 'hello', ver: a, role: b as 0 | 1 } : null;
+    case OP.config:
+      return config && { t: 'config', config };
+    case OP.ready:
+      return n === 65 ? { t: 'ready', board: u.slice(1, 33), coin: u.slice(33) } : null;
+    case OP.coin:
       return n === 17 ? { t: 'coin', nonce: u.slice(1) } : null;
-    case OP.FIRE: {
-      const cells = Array.from(u.subarray(1));
-      return cells.length >= 1 && cells.length <= 5 && cells.every((c) => c < 100) ? { t: 'fire', cells } : null;
+    case OP.fire: {
+      const cells = [...u.subarray(1)];
+      return n > 1 && n < 7 && cells.every((x) => x < 100) ? { t: 'fire', cells } : null;
     }
-    case OP.ANSWER: {
+    case OP.answer: {
       const entries: Entry[] = [];
-      let i = 1;
-      while (i < n) {
-        if (i + 1 >= n) return null;
-        const cell = at(i);
-        const code = at(i + 1);
-        i += 2;
-        if (cell > 99 || code > 6) return null;
-        if (code >= 2) {
-          if (i >= n) return null;
-          const ship = decodeShip(at(i++));
-          if (!ship) return null;
-          entries.push({ cell, code, ship });
-        } else entries.push({ cell, code });
+      for (let i = 1; i < n; ) {
+        const cell = u[i++]!;
+        const code = u[i++] ?? 9;
+        const ship = code > 1 ? decodeShip(u[i++] ?? 255) : null;
+        if (cell > 99 || code > 6 || i > n || (code > 1 && !ship)) return null;
+        entries.push(ship ? { cell, code, ship } : { cell, code });
       }
       return { t: 'answer', entries };
     }
-    case OP.USE:
-      return n === 4 && at(1) <= 3 ? { t: 'use', item: at(1) as ItemId, a: at(2), b: at(3) } : null;
-    case OP.SONAR:
-      return n === 2 && at(1) <= 9 ? { t: 'sonar', count: at(1) } : null;
-    case OP.REVEAL: {
-      const fleet = n === 22 ? decodeFleet(u.subarray(17)) : null;
+    case OP.use:
+      return n === 4 && a < 4 ? { t: 'use', item: a as ItemId, a: b, b: c } : null;
+    case OP.sonar:
+      return n === 2 && a < 10 ? { t: 'sonar', count: a } : null;
+    case OP.reveal: {
+      const fleet = n === 22 && decodeFleet(u.subarray(17));
       return fleet ? { t: 'reveal', salt: u.slice(1, 17), fleet } : null;
     }
-    case OP.VERDICT:
-      return n === 2 && at(1) <= 1 ? { t: 'verdict', ok: at(1) === 1 } : null;
-    case OP.REMATCH: {
-      if (n === 1) return { t: 'rematch' };
-      const config = n === 4 ? decodeConfig(at(1), at(2), at(3)) : null;
-      return config ? { t: 'rematch', config } : null;
-    }
-    case OP.BYE:
+    case OP.verdict:
+      return n === 2 && a < 2 ? { t: 'verdict', ok: a === 1 } : null;
+    case OP.rematch:
+      return n === 1 ? { t: 'rematch' } : config && { t: 'rematch', config };
+    case OP.bye:
       return n === 1 ? { t: 'bye' } : null;
   }
-  return null;
-}
-
-export const attackMsg = (a: Attack): Msg =>
-  a.k === 'fire' ? { t: 'fire', cells: a.cells } : { t: 'use', item: a.item, a: a.a, b: a.b };
-
-export const answerMsg = (a: Answer): Msg =>
-  a.k === 'sonar' ? { t: 'sonar', count: a.count } : { t: 'answer', entries: a.entries };
-
-export function msgAttack(m: Msg): Attack | null {
-  if (m.t === 'fire') return { k: 'fire', cells: m.cells };
-  if (m.t === 'use') return { k: 'item', item: m.item, a: m.a, b: m.b };
-  return null;
-}
-
-export function msgAnswer(m: Msg): Answer | null {
-  if (m.t === 'answer') return { k: 'cells', entries: m.entries };
-  if (m.t === 'sonar') return { k: 'sonar', count: m.count };
   return null;
 }

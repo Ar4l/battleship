@@ -64,3 +64,20 @@ test('bad link: a truncated offer link explains itself', async ({ browser }) => 
   await A.goto('./#o=EAR4d1ZSG');
   await expect(A.locator('#notice')).toContainText('That link looks incomplete');
 });
+
+test('leave: mid-game "Leave" asks first; Stay keeps playing, Leave ends it for both', async ({ browser }) => {
+  const A = await player(browser);
+  const B = await player(browser);
+  await connectDirect(A, B);
+  await A.click('#leave');
+  await expect(A.locator('#stay')).toBeFocused();
+  await A.click('#stay');
+  await expect(A.locator('.placement')).toBeVisible();
+  await expect(A.locator('#leave')).toBeVisible();
+  await readyBoth(A, B);
+  await A.click('#leave');
+  await expect(A.locator('.battle')).toBeVisible();
+  await A.click('#leave-yes');
+  await expect(A.locator('#create')).toBeVisible();
+  await expect(B.locator('#notice')).toContainText('Your opponent left');
+});

@@ -5,103 +5,50 @@ export const SHIP_NAMES = ['Carrier', 'Battleship', 'Cruiser', 'Submarine', 'Des
 export const TOTAL_SHIP_CELLS = 17;
 export const MODE_NAMES = ['Classic', 'Salvo', 'Items'] as const;
 export const TIMERS: readonly Timer[] = [0, 15, 30, 60];
-
 export const DEFAULT_CONFIG: Config = { mode: 0, extraShot: false, noTouch: false, timer: 0 };
 
+/** Row of a cell (0..9). */
+export const row = (c: Cell): number => (c - (c % 10)) / 10;
+
 /** Cells covered by a ship of length `len`, or null if it leaves the board. */
-export function shipCells(ship: Ship, len: number): Cell[] | null {
-  const { anchor, vertical } = ship;
-  if (!Number.isInteger(anchor) || anchor < 0 || anchor > 99) return null;
-  const r = Math.floor(anchor / 10);
-  const c = anchor % 10;
-  if (vertical ? r + len > 10 : c + len > 10) return null;
-  const out: Cell[] = [];
-  for (let i = 0; i < len; i++) out.push(anchor + (vertical ? i * 10 : i));
-  return out;
+export function shipCells({ anchor: a, vertical: v }: Ship, len: number): Cell[] | null {
+  return Number.isInteger(a) && a >= 0 && a < 100 && (v ? row(a) : a % 10) + len <= 10 ? Array.from({ length: len }, (_, i) => a + (v ? 10 * i : i)) : null;
 }
 
 /** 8-neighbourhood of a cell (on board, excluding the cell). */
-export function neighbours8(cell: Cell): Cell[] {
-  const r = Math.floor(cell / 10);
-  const c = cell % 10;
-  const out: Cell[] = [];
-  for (let dr = -1; dr <= 1; dr++)
-    for (let dc = -1; dc <= 1; dc++) {
-      if (!dr && !dc) continue;
-      const rr = r + dr;
-      const cc = c + dc;
-      if (rr >= 0 && rr < 10 && cc >= 0 && cc < 10) out.push(rr * 10 + cc);
-    }
-  return out;
-}
+export const neighbours8 = (c: Cell): Cell[] => [-11, -10, -9, -1, 1, 9, 10, 11].map((d) => c + d).filter((n) => n >= 0 && n < 100 && Math.abs((n % 10) - (c % 10)) < 2);
 
 /**
- * Occupancy grid: ship index per cell or -1. Returns null if any ship is out of
- * bounds, ships overlap, or (noTouch) ships touch, including diagonally.
- * `skip` ignores one ship (used while dragging it).
+ * Occupancy grid: ship index per cell or -1. Null if any ship is off the board,
+ * ships overlap, or (noTouch) ships touch, diagonals included. Works for the
+ * first n ships of a fleet too.
  */
-export function occupancy(fleet: Fleet, noTouch: boolean, skip = -1): Int8Array | null {
-  return fleet.length === FLEET.length ? occupancyPartial(fleet, noTouch, skip) : null;
-}
-
-/** Same as occupancy() but for the first n ships of the fleet (n <= 5). */
-export function occupancyPartial(fleet: Fleet, noTouch: boolean, skip = -1): Int8Array | null {
-  if (fleet.length > FLEET.length) return null;
+export function occupancy(fleet: Fleet, noTouch: boolean): Int8Array | null {
   const occ = new Int8Array(100).fill(-1);
   for (let i = 0; i < fleet.length; i++) {
-    if (i === skip) continue;
     const cells = shipCells(fleet[i]!, FLEET[i]!);
     if (!cells) return null;
-    for (const cell of cells) {
-      if (occ[cell] !== -1) return null;
-      occ[cell] = i;
+    for (const c of cells) {
+      if (occ[c]! >= 0) return null;
+      occ[c] = i;
     }
   }
-  if (noTouch) {
-    for (let cell = 0; cell < 100; cell++) {
-      const s = occ[cell]!;
-      if (s < 0) continue;
-      for (const n of neighbours8(cell)) {
-        const o = occ[n]!;
-        if (o >= 0 && o !== s) return null;
-      }
-    }
-  }
-  return occ;
+  return noTouch && occ.some((s, c) => s >= 0 && neighbours8(c).some((n) => occ[n]! >= 0 && occ[n] !== s)) ? null : occ;
 }
 
-export const fleetLegal = (fleet: Fleet, noTouch: boolean): boolean => occupancy(fleet, noTouch) !== null;
+export const fleetLegal = (fleet: Fleet, noTouch: boolean): boolean => fleet.length === 5 && !!occupancy(fleet, noTouch);
 
 /** Can ship i be placed at `ship` given the rest of the fleet? */
-export function canPlace(fleet: Fleet, i: number, ship: Ship, noTouch: boolean): boolean {
-  const next = fleet.slice();
-  next[i] = ship;
-  return occupancy(next, noTouch) !== null;
-}
+export const canPlace = (fleet: Fleet, i: number, ship: Ship, noTouch: boolean): boolean => fleetLegal(fleet.map((s, k) => (k === i ? ship : s)), noTouch);
 
-export function configFlags(c: Config): number {
-  return (c.extraShot ? 1 : 0) | (c.noTouch ? 2 : 0);
-}
+export const configFlags = (c: Config): number => +c.extraShot | (+c.noTouch << 1);
+export const encodeConfig = (c: Config): [number, number, number] => [c.mode, configFlags(c), c.timer];
 
-export function encodeConfig(c: Config): [number, number, number] {
-  return [c.mode, configFlags(c), c.timer];
-}
+export const decodeConfig = (mode: number, flags: number, timer: number): Config | null =>
+  mode > 2 || flags > 3 || !TIMERS.includes(timer as Timer)
+    ? null
+    : // Extra shot only exists in Classic.
+      { mode: mode as Mode, extraShot: !mode && !!(flags & 1), noTouch: !!(flags & 2), timer: timer as Timer };
 
-export function decodeConfig(mode: number, flags: number, timer: number): Config | null {
-  if (mode > 2 || flags > 3 || !TIMERS.includes(timer as Timer)) return null;
-  return {
-    mode: mode as Mode,
-    // Extra shot only exists in Classic.
-    extraShot: mode === 0 && (flags & 1) === 1,
-    noTouch: (flags & 2) === 2,
-    timer: timer as Timer,
-  };
-}
-
-export function rulesLine(c: Config): string {
-  const parts: string[] = [MODE_NAMES[c.mode]];
-  if (c.mode === 0 && c.extraShot) parts.push('Extra shot after a hit');
-  if (c.noTouch) parts.push("Ships can't touch");
-  parts.push(c.timer ? `${c.timer} s turns` : 'No timer');
-  return parts.join(' · ');
-}
+export const rulesLine = (c: Config): string =>
+  [MODE_NAMES[c.mode], !c.mode && c.extraShot && 'Extra shot after a hit', c.noTouch && "Ships can't touch", c.timer ? c.timer + ' s turns' : 'No timer'].filter(Boolean).join(' · ');

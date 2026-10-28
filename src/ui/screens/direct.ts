@@ -1,77 +1,64 @@
+// Loaded on demand with the direct-link fallback.
+import css from '../../styles/direct.css?inline';
 import type { Controller } from '../../app/controller';
 import { h } from '../h';
-import { btn, copyBtn, gameUrl, label, linkBox, prettyUrl, shareBtn, type Screen } from '../kit';
+import { btn, copyBtn, gameUrl, label, linkBox, prettyUrl, shareBtn, status, type Screen } from '../kit';
 
-const step = (n: number, title: string, ...body: (Node | null)[]) =>
-  h('li', { cls: 'step' }, h('span', { cls: 'step-n mono', 'aria-hidden': 'true' }, n), h('div', { cls: 'step-body' }, h('h3', { cls: 'h3' }, title), ...body));
+document.head.append(h('style', null, css));
+
+const step = (n: number, title: string, ...body: unknown[]) =>
+  h('li', null, h('span', { cls: 'step-n mono', 'aria-hidden': 'true' }, n), h('div', 'stack', h('h3', 'h3', title), ...(body as Node[])));
+const head = (title: string) => [label('Direct link'), h('h2', 'h2', title)];
+const share = (url: string, id: string) => [linkBox(prettyUrl(url), id + '-link'), h('div', 'row-btns', copyBtn(() => url, 'Copy link', 'copy-' + id), shareBtn(() => url))];
 
 export function directHost(ctrl: Controller): Screen {
-  const el = h('section', { cls: 'screen narrow' });
-  let built = '';
-  let paste: HTMLInputElement | null = null;
-  let err: HTMLElement | null = null;
-  let status: HTMLElement | null = null;
+  const el = h('section', 'screen narrow', ...head('Preparing link…'));
+  const paste = h('input', { id: 'paste', cls: 'mono input', placeholder: 'Paste reply', autocomplete: 'off', 'aria-label': 'Reply link or code' });
+  const err = h('p', { cls: 'small error', role: 'alert' });
+  const note = h('p', 'small muted');
+  const connect = () => paste.value.trim() && ctrl.pasteAnswer(paste.value);
+  paste.addEventListener('keydown', (e) => e.key === 'Enter' && connect());
+  let built = false;
   const update = () => {
     const s = ctrl.state;
-    if (s.s !== 'direct-host') return;
-    if (s.blob && built !== s.blob) {
-      built = s.blob;
-      const url = gameUrl('o=' + s.blob);
-      paste = h('input', { id: 'paste', cls: 'mono input', placeholder: 'Paste reply', autocomplete: 'off', 'aria-label': 'Reply link or code' });
-      err = h('p', { cls: 'small error', role: 'alert' });
-      status = h('p', { cls: 'small muted' });
-      const connect = () => paste!.value.trim() && ctrl.pasteAnswer(paste!.value);
-      paste.addEventListener('keydown', (e) => e.key === 'Enter' && connect());
+    if (s.s !== 'direct-host' || !s.blob) return;
+    if (!built)
       el.replaceChildren(
-        label('Direct link'),
-        h('h2', { cls: 'h2' }, 'Connect with a direct link'),
+        ...head('Connect with a direct link'),
         h(
           'ol',
-          { cls: 'steps' },
-          step(1, 'Send this link to your friend', linkBox(prettyUrl(url), 'offer-link'), h('div', { cls: 'row-btns' }, copyBtn(() => url, 'Copy link', 'copy-offer'), shareBtn(() => url))),
-          step(2, 'Paste their reply', h('div', { cls: 'join' }, paste, btn('Connect', connect, { primary: true, id: 'connect' })), err, status),
+          'steps',
+          step(1, 'Send this link to your friend', ...share(gameUrl('o=' + s.blob), 'offer')),
+          step(2, 'Paste their reply', h('div', 'join', paste, btn('Connect', connect, 'primary', 'connect')), err, note),
         ),
-        h('p', { cls: 'small muted' }, 'Keep this tab open.'),
-        btn('Cancel', () => ctrl.leave(), { quiet: true }),
+        h('p', 'small muted', 'Keep this tab open.'),
+        btn('Cancel', () => ctrl.leave(), 'quiet'),
       );
-    } else if (!s.blob) {
-      el.replaceChildren(label('Direct link'), h('h2', { cls: 'h2' }, 'Preparing link…'));
-    }
-    if (err) err.textContent = s.error ?? '';
-    if (status) status.textContent = s.step === 'connecting' ? 'Connecting…' : '';
+    built = true;
+    err.textContent = s.error ?? '';
+    note.textContent = s.connecting ? 'Connecting…' : '';
   };
   update();
   return { el, update };
 }
 
 export function directGuest(ctrl: Controller): Screen {
-  const el = h('section', { cls: 'screen narrow' });
-  let built = '';
+  const el = h('section', 'screen narrow', ...head('Preparing reply…'));
+  let built = false;
   const update = () => {
     const s = ctrl.state;
-    if (s.s !== 'direct-guest') return;
-    if (!s.blob) return el.replaceChildren(label('Direct link'), h('h2', { cls: 'h2' }, 'Preparing reply…'));
-    if (built === s.blob) return;
-    built = s.blob;
-    const url = gameUrl('a=' + s.blob);
+    if (s.s !== 'direct-guest' || !s.blob || built) return;
+    built = true;
+    const blob = s.blob;
     el.replaceChildren(
-      label('Direct link'),
-      h('h2', { cls: 'h2' }, 'Almost there'),
+      ...head('Almost there'),
       h(
         'ol',
-        { cls: 'steps' },
-        step(
-          1,
-          'Send this reply link back',
-          linkBox(prettyUrl(url), 'answer-link'),
-          h('div', { cls: 'row-btns' }, copyBtn(() => url, 'Copy link', 'copy-answer'), shareBtn(() => url)),
-          h('p', { cls: 'small muted' }, 'Or copy just the code:'),
-          h('div', { cls: 'linkbox mono small', id: 'answer-code', tabindex: 0, 'aria-label': 'Reply code' }, s.blob),
-          copyBtn(() => s.blob!, 'Copy code'),
-        ),
-        step(2, 'Your friend opens it', h('p', { cls: 'status-line' }, h('span', { cls: 'blink', 'aria-hidden': 'true' }), 'Waiting for your friend to connect…')),
+        'steps',
+        step(1, 'Send this reply link back', ...share(gameUrl('a=' + blob), 'answer'), h('p', 'small muted', 'Or copy just the code:'), linkBox(blob, 'answer-code', 'small'), copyBtn(() => blob, 'Copy code')),
+        step(2, 'Your friend opens it', status('Waiting for your friend to connect…')),
       ),
-      btn('Cancel', () => ctrl.leave(), { quiet: true }),
+      btn('Cancel', () => ctrl.leave(), 'quiet'),
     );
   };
   update();
@@ -79,21 +66,15 @@ export function directGuest(ctrl: Controller): Screen {
 }
 
 export function forwarded(ctrl: Controller): Screen {
-  const s = ctrl.state;
-  if (s.s !== 'forwarded') return { el: h('section') };
-  const el = h(
-    'section',
-    { cls: 'screen narrow', id: 'forwarded' },
-    label('Direct link'),
-    s.ok
-      ? h('div', { cls: 'stack' }, h('h2', { cls: 'h2' }, 'Sent to your game tab. You can close this tab.'))
-      : h(
-          'div',
-          { cls: 'stack' },
-          h('h2', { cls: 'h2' }, 'Open your game tab and paste this code there'),
-          h('div', { cls: 'linkbox mono small', tabindex: 0 }, s.blob),
-          copyBtn(() => s.blob, 'Copy code'),
-        ),
-  );
-  return { el };
+  const s = ctrl.state as Extract<typeof ctrl.state, { s: 'forwarded' }>;
+  return {
+    el: h(
+      'section',
+      { cls: 'screen narrow', id: 'forwarded' },
+      label('Direct link'),
+      ...(s.ok
+        ? [h('h2', 'h2', 'Sent to your game tab. You can close this tab.')]
+        : [h('h2', 'h2', 'Open your game tab and paste this code there'), linkBox(s.blob, '', 'small'), copyBtn(() => s.blob, 'Copy code')]),
+    ),
+  };
 }
