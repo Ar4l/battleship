@@ -117,7 +117,6 @@ function apply(m: Match, s: Side, attack: Attack, answer: Answer): void {
     const fp = footprint(SONAR, (attack as { a: number }).a, 0);
     board.sonar.push({ a: fp[4]!, count: answer.count });
     if (!answer.count) learn(fp);
-    board.last = fp;
   } else {
     const torpedo = attack.k === 'item' && attack.item === TORPEDO;
     if (torpedo) cells.forEach((c) => c === answer.entries[0]?.cell || board.known.add(c));

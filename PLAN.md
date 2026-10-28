@@ -32,7 +32,7 @@ battleship/
   vite.config.ts           base '/battleship/', target es2022, modulePreload {polyfill:false},
                            cssCodeSplit false, tiny inline-css plugin (transformIndexHtml)
   tsconfig.json            strict, noUncheckedIndexedAccess
-  package.json             deps: trystero@0.26.0 (exact). dev: vite, typescript, vitest,
+  package.json             deps: @trystero-p2p/torrent@0.26.0 (exact). dev: vite, typescript, vitest,
                            @playwright/test, @axe-core/playwright
   playwright.config.ts
   scripts/size.mjs         gzip every dist asset, enforce budget (§12), exit 1 on breach
@@ -61,7 +61,7 @@ battleship/
     net/
       transport.ts         interface Transport { send(u8), onmessage, onclose, close() };
                            fromChannel(dc, pc): wraps RTCDataChannel + pc.connectionState
-      room.ts              ALL Trystero usage (dynamic import('trystero')), room lock,
+      room.ts              ALL Trystero usage (dynamic import('@trystero-p2p/torrent')), room lock,
                            code collision handling, raw channel creation
       direct.ts            manual SDP host/guest, ICE gather with settle timer
       forward.ts           BroadcastChannel('battleship') answer forwarding
@@ -133,14 +133,14 @@ Inside a battle, `match.phase` is one of `myTurn | awaitingAnswer | theirTurn | 
 ### 4.1 Trystero path (`net/room.ts`)
 
 ```ts
-const { joinRoom } = await import('trystero');
+const { joinRoom } = await import('@trystero-p2p/torrent');
 room = joinRoom({ appId: 'aral.cc-battleship',
                   relayConfig: { warnOnRelayFailure: false } },
                 'r' + code, { onJoinError, onPeerHandshake, handshakeTimeoutMs: 10000 });
 ```
 
 - Room id is `'r' + code`. The code is a random integer from 1000 to 9999, generated with `crypto.getRandomValues`, so there are no leading-zero codes.
-- Prefetching: call `import('trystero')` on the first `pointerenter`/`touchstart`/`focus` of Create, on the first digit typed into the code field, and immediately when the page loads with `#NNNN`. Users who only view the home page download about 11 KB.
+- Prefetching: call `import('@trystero-p2p/torrent')` on the first `pointerenter`/`touchstart`/`focus` of Create, on the first digit typed into the code field, and immediately when the page loads with `#NNNN`. Users who only view the home page download about 11 KB.
 - **Handshake (room lock).** This uses Trystero's handshake `send`/`receive` with JSON `{v:1, r:'h'|'g', busy:boolean, t:createdAtMs}`.
   - Host: if `opponent || reserved` is set, send `busy:true` and throw. Otherwise set `reserved = id` *synchronously* before the first await, send `busy:false`, and receive.
     - If the remote is `r:'g'` and not busy, accept.
@@ -158,8 +158,8 @@ room = joinRoom({ appId: 'aral.cc-battleship',
 - **Timeouts:**
   - Host after 6 s: if `getRelaySockets()` reports no socket in `readyState === 1`, set `net:'relays-down'` and show the direct-link panel prominently ("Can't reach the matchmaking network. Use a direct link instead."). Otherwise, wait for the friend indefinitely. A link reading "Trouble connecting? Use a direct link" is always visible.
   - Guest after 10 s with no host handshake: set `slow:true`. The guest sees "Still looking for game 4821. Check the code, or ask your friend for a direct link." with a Retry button. The guest keeps listening in the background.
-  - `onJoinError` after SDP was exchanged means ICE failed. The fallback uses the same STUN servers and would fail the same way, so go straight to `notice('failed')`. If the error is a handshake timeout, go back to waiting.
-  - After the channel opens, if `pc.connectionState === 'failed'`, or it stays `'disconnected'` for more than 8 s, go to `notice('left')`.
+  - `onJoinError` after SDP was exchanged means ICE failed. The fallback uses the same STUN servers and would fail the same way, so the guest goes straight to `notice('failed')`. The host can't tell its friend from a stray peer at that point (ICE fails before the handshake), so it forgets the peer and stays in the lobby, where the direct link is one tap away. If the error is a handshake timeout, go back to waiting.
+  - After the channel opens, if `pc.connectionState === 'failed'`, or it stays `'disconnected'` for more than 20 s (long enough for a quick switch to a messenger app), go to `notice('left')` ("Your opponent left or lost connection.").
 
 ### 4.2 Direct-link fallback (`net/direct.ts`, `proto/sdp.ts`)
 
@@ -188,7 +188,7 @@ room = joinRoom({ appId: 'aral.cc-battleship',
 - **`#a=` tab:** post `{t:'a', blob}` on BroadcastChannel and wait 600 ms for an ack.
   - With an ack, show "Sent to your game tab. You can close this tab."
   - Without one, show "Open your game tab and paste this code there", followed by the blob and a Copy button. This is the in-app browser case.
-- **Timeout:** the host goes to `notice('failed')` 15 s after `setRemoteDescription(answer)` if the channel is not open, or at once on `connectionState === 'failed'`. The guest gets the same 15 s limit, counted from when its pc reaches `'checking'`. If its pc never reaches `'checking'`, the guest gives up after 120 s of waiting for the friend.
+- **Timeout:** the host goes to `notice('failed')` 15 s after `setRemoteDescription(answer)` if the channel is not open, or at once on `connectionState === 'failed'`. The guest has no signal for "the host applied my answer": its pc starts ICE checks as soon as it has the offer, because the host's agent answers STUN before it has the answer. So the guest waits up to 5 min for the reply to travel through a messenger, failing earlier only on `connectionState === 'failed'`.
 - After reading `#o=` or `#a=`, call `history.replaceState` to clear the hash. A `#NNNN` hash stays, so a reload rejoins.
 
 ### 4.3 Failure notice
@@ -254,7 +254,7 @@ The full check happens at reveal.
   1. The hash matches the commit, else "Their fleet doesn't match what they committed to at the start."
   2. The fleet is legal under the config: in bounds, no overlap, no-touch if that flag is set. Else "Their fleet layout was illegal."
   3. Replay the transcript: for each attack, `resolveAttack(revealedFleet, hitSetSoFar, attack)` must encode to the same bytes the peer sent. The first mismatch produces a specific reason, e.g. "Cheating detected: they reported a miss at E4 but a ship was there", "…reported 1 ship cell in the sonar at C3–E5, there were 3", or "…torpedo passed through a ship at G7".
-- If no REVEAL arrives within 10 s of game over, or the peer left, the verdict is `unverified` and reads "Opponent left before revealing their fleet — result not verified." A forfeit win is still shown as a win.
+- If the peer left before revealing, the verdict is `unverified` and reads "Opponent left before revealing their fleet — result not verified." If they are still connected but no REVEAL arrives within 10 s, it reads "Opponent didn't reveal their fleet — result not verified." (a late honest REVEAL still upgrades it to verified). A forfeit win is still shown as a win.
 - Each side sends VERDICT, so the end screen can say "Opponent verified your fleet" or "Opponent's check failed".
 - The end screen shows the opponent's revealed fleet in slate on your target board, overlaid on the marks.
 
@@ -340,7 +340,7 @@ The text is short and literal. There is no marketing copy and no exclamation mar
    - Below it, the ship dock lists the fleet as capsules with names. This is a drag source only when a ship is lifted off the board.
    - Buttons: **Randomize**, **Rotate** (applies to the selected ship), **Ready** (primary).
    - A rules line in slate, e.g. "Salvo · Ships can't touch · 30 s turns".
-   - After Ready: "Waiting for opponent to place their fleet". The opponent's ready state shows as "Opponent ready".
+   - After Ready, the disabled Ready button itself reads "Waiting for opponent…". The opponent's ready state shows as "Opponent ready".
 6. **Battle** (layout in §9.5)
    - The target board is labelled "THEIR WATERS" and your own board "YOUR FLEET".
    - Status strip: "Your turn" or "Waiting for opponent", plus the last result, e.g. "E4 hit" or "You sank their Cruiser".
@@ -538,7 +538,7 @@ applyAnswer(m, answer): { m, events: UiEvent[] } | { cheat: string }
 
 ### 13.2 End-to-end (Playwright, `e2e/`)
 
-- The server is `vite build && vite preview --port 4173`, and tests use `http://localhost:4173/battleship/`, which is a secure context, so `crypto.subtle` is available.
+- The server is `vite build --outDir dist-e2e && vite preview --outDir dist-e2e --port 4174`, and tests use `http://localhost:4174/battleship/`, which is a secure context, so `crypto.subtle` is available.
 - Chromium is the required project. Firefox is an optional project that runs when it is installed. Every page sets `localStorage['bs:debug']='1'`.
 - **Two browser contexts** (A = host, B = guest) for every multiplayer test.
 
@@ -555,7 +555,7 @@ applyAnswer(m, answer): { m, events: UiEvent[] } | { cheat: string }
 4. **`leave.spec.ts`**: closing B's page mid-battle makes A show "Your opponent left".
 5. **`failed.spec.ts`**: with a test hook that sets `iceServers: []` and replaces candidates with an unreachable address, A shows "Couldn't connect — your network may be blocking peer-to-peer" within 20 s, and Retry returns home.
 6. **`trystero.spec.ts` (tagged `@net`)**
-   - It first checks whether `wss://nos.lol` can be opened and skips if it cannot.
+   - It first checks whether `wss://tracker.openwebtorrent.com` can be opened and skips if it cannot.
    - A: Create and read the code. B: type the code. Both reach placement within 15 s.
    - A third context C joins the same code and sees "Game NNNN already has two players." A and B stay connected; a FIRE still works after C joins.
    - Also check the `#NNNN` link path.

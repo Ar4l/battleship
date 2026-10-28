@@ -5,7 +5,7 @@ import type { Ship } from '../../game/types';
 import { announce } from '../announce';
 import { board, capsule, cellsOf } from '../grid';
 import { h } from '../h';
-import { blink, btn, label, type Screen } from '../kit';
+import { btn, label, type Screen } from '../kit';
 
 type Ghost = { i: number; ship: Ship };
 
@@ -175,10 +175,9 @@ export function placement(ctrl: Controller): Screen {
       d.disabled = me;
     });
     randomize.disabled = rot.disabled = ready.disabled = me;
-    status.replaceChildren(
-      me ? blink() : '',
-      me ? (s.ready.them ? 'Starting…' : 'Waiting for opponent to place their fleet') : s.ready.them ? h('span', { id: 'opp-ready' }, 'Opponent ready') : '',
-    );
+    // The waiting state shows where the player just tapped.
+    ready.lastChild!.textContent = me ? (s.ready.them ? 'Starting…' : 'Waiting for opponent…') : 'Ready';
+    status.replaceChildren(!me && s.ready.them ? h('span', { id: 'opp-ready' }, 'Opponent ready') : '');
   }
   render();
   return { el, update: render };

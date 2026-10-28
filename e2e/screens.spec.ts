@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { bs, connectDirect, player, readyBoth, targetCell, waitTurn, playOut } from './util';
+import { bs, player, targetCell, waitTurn, playOut } from './util';
 
 const SIZES = [
   { name: 'mobile', viewport: { width: 390, height: 844 } },
@@ -23,7 +23,9 @@ const FLEET_B = [
   { anchor: 19, vertical: true },
 ];
 
+// CI keeps the flow and its DOM audit but skips the throwaway images.
 async function shot(p: Page, name: string): Promise<void> {
+  if (process.env.CI) return;
   await p.waitForTimeout(150);
   await p.screenshot({ path: `${DIR}/${name}.png`, fullPage: true });
 }
@@ -62,7 +64,12 @@ for (const size of SIZES)
       await bs(B, 'setFleet', FLEET_B);
       await A.locator('.dock-ship').first().click();
       await shot(A, `06-placement-${tag}`);
-      await readyBoth(A, B);
+      await A.click('#ready');
+      await expect(A.locator('#ready')).toHaveText('Waiting for opponent…');
+      await shot(A, `06b-placement-waiting-${tag}`);
+      await B.click('#ready');
+      await expect(A.locator('.battle')).toBeVisible();
+      await expect(B.locator('.battle')).toBeVisible();
       // Make A start for a predictable picture.
       let p = await waitTurn(A, B);
       if (p === B) await targetCell(B, 0).click();

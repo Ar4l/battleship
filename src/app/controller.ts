@@ -22,6 +22,7 @@ export interface NetDeps {
 
 type Battle = Extract<AppState, { s: 'battle' }>;
 const UNVERIFIED = 'Opponent left before revealing their fleet — result not verified.';
+const NO_REVEAL = "Opponent didn't reveal their fleet — result not verified.";
 const doc = typeof document !== 'undefined' ? document : null;
 
 export class Controller {
@@ -236,7 +237,8 @@ export class Controller {
   }
 
   setFleet(f: Fleet): void {
-    if (this.state.s !== 'placement' || this.state.ready.me) return;
+    // Not while ready() is hashing: the committed fleet must be the one played.
+    if (this.state.s !== 'placement' || this.state.ready.me || this.readying) return;
     this.fleet = f;
     this.emit();
   }
@@ -478,7 +480,7 @@ export class Controller {
     this.revealed = true;
     this.timer('reveal', 10000, () => {
       const e = this.state;
-      if (e.s === 'end' && e.verdict === 'pending') this.set({ ...e, verdict: 'unverified', reason: UNVERIFIED });
+      if (e.s === 'end' && e.verdict === 'pending') this.set({ ...e, verdict: 'unverified', reason: NO_REVEAL });
     });
   }
 

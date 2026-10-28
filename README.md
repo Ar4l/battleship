@@ -17,7 +17,7 @@ npm run dev        # Vite dev server
 npm test           # unit tests (vitest)
 npm run build      # dist/ with base /battleship/
 npm run size       # gzip size table and budget check
-npm run e2e        # Playwright: builds, serves on :4173, plays full games
+npm run e2e        # Playwright: builds, serves dist-e2e on :4174, plays full games
 npm run check      # everything above
 ```
 

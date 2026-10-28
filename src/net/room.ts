@@ -70,7 +70,9 @@ export function openRoom(role: 'host' | 'guest', code: number, ev: RoomEvents): 
         handshakeTimeoutMs: 10000,
         onJoinError: (e) => {
           forget(e.peerId);
-          if (!opponent && /after exchanging SDP/.test(e.error)) ev.failed();
+          // ICE fails before the handshake, so the host can't tell its friend from a
+          // stray peer: it stays in the lobby (the direct link is one tap away).
+          if (!host && !opponent && /after exchanging SDP/.test(e.error)) ev.failed();
         },
         onPeerHandshake: async (id, send, receive) => {
           const say = (busy: boolean) => send({ r: host ? 'h' : 'g', busy, t: t0 } as never);

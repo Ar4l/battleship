@@ -37,11 +37,12 @@ export function model(b: BoardView, o: { own?: Fleet; reveal?: Fleet; sel?: numb
     );
     const a = delay.get(c) ?? -1;
     if (known && !isHit) ov += knownDot(c);
-    else if (shot) ov += isHit ? hit(c, a) : miss(c, a);
+    else if (shot) ov += isHit ? hit(c, a, !!o.own) : miss(c, a);
   }
   b.sunk.forEach((s, i) => s && (ov += sunk(s, i, cellsOf(s, i).some((c) => delay.has(c)))));
   for (const s of b.sonar) ov += sonarBox(s.a, s.count);
-  for (const c of b.last) if (b.shot.has(c)) ov += last(c);
+  // Not inside a sunk ship's outline: the marker would split the capsule.
+  for (const c of b.last) if (b.shot.has(c) && sunkAt[c] === undefined) ov += last(c);
   return { cls, labels, overlay: ov };
 }
 

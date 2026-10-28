@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Controller } from '../../src/app/controller';
 import { lie } from '../../src/app/debug';
-import { encode, type Msg } from '../../src/proto/codec';
+import { decode, encode, type Msg } from '../../src/proto/codec';
 import { memoryPair } from '../../src/net/transport';
 import { shipCells, FLEET } from '../../src/game/rules';
 import { shotsAllowed, untargeted } from '../../src/game/engine';
@@ -40,7 +40,7 @@ async function placeAndStart(H: Controller, G: Controller) {
 }
 
 /** The player on turn sinks the other, the other always misses. */
-async function playOut(H: Controller, G: Controller) {
+async function playOut(H: Controller, G: Controller, settle = true) {
   const fleets = new Map([[H, FLEET_A], [G, FLEET_B]]);
   for (let guard = 0; guard < 400; guard++) {
     if (H.state.s === 'end' && G.state.s === 'end') break;
@@ -59,6 +59,7 @@ async function playOut(H: Controller, G: Controller) {
     await until(() => me.match?.phase !== 'awaitingAnswer');
   }
   await until(() => H.state.s === 'end' && G.state.s === 'end');
+  if (!settle) return;
   await until(() => H.state.s === 'end' && H.state.verdict !== 'pending' && G.state.s === 'end' && G.state.verdict !== 'pending');
 }
 
@@ -192,5 +193,53 @@ describe('controller over an in-memory transport', () => {
     await new Promise((r) => setTimeout(r, 300));
     H.attach(a, 'host');
     await until(() => H.state.s === 'placement' && G.state.s === 'placement');
+  });
+
+  it('the fleet committed by ready() is the one played: no edits while hashing', async () => {
+    const { H, G } = await connect({});
+    H.setFleet(FLEET_A);
+    const p = H.ready();
+    H.setFleet(FLEET_B);
+    await p;
+    expect(H.fleet).toEqual(FLEET_A);
+    await G.ready();
+    await until(() => H.state.s === 'battle');
+  });
+
+  it("a REVEAL that misses the 10 s window reads as withheld, then still verifies when it arrives", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { H, G } = await connect({});
+      await placeAndStart(H, G);
+      // Hold the host's REVEAL.
+      const t = (H as unknown as { t: { send(u: Uint8Array): void } }).t;
+      const send = t.send;
+      let held: Uint8Array | null = null;
+      t.send = (u) => (decode(u)?.t === 'reveal' ? void (held = u) : send(u));
+      await playOut(H, G, false);
+      expect(G.state).toMatchObject({ s: 'end', verdict: 'pending' });
+      vi.advanceTimersByTime(10_000);
+      expect(G.state).toMatchObject({ verdict: 'unverified', reason: "Opponent didn't reveal their fleet — result not verified." });
+      send(held!);
+      await until(() => (G.state as { verdict: string }).verdict === 'verified');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('rematch: the host changes the mode after the guest already asked', async () => {
+    const { H, G } = await connect({ mode: 0 });
+    await placeAndStart(H, G);
+    await playOut(H, G);
+    G.rematch();
+    await until(() => H.state.s === 'end' && H.state.rematch.them);
+    H.toggleEditing();
+    H.setConfig({ mode: 1 });
+    H.rematch();
+    await until(() => H.state.s === 'placement' && G.state.s === 'placement');
+    expect(G.config.mode).toBe(1);
+    await placeAndStart(H, G);
+    expect(H.match!.config.mode).toBe(1);
+    expect(G.match!.config.mode).toBe(1);
   });
 });

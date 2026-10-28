@@ -16,16 +16,30 @@ export async function player(browser: Browser, opts: BrowserContextOptions = {})
   });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => console.log('[pageerror]', e.message));
+  // window.__bs arrives through an async import: every navigation waits for it.
+  const goto = page.goto.bind(page);
+  page.goto = async (url, o) => {
+    const r = await goto(url, o);
+    if (!url.startsWith('about:')) await debugReady(page);
+    return r;
+  };
   return page;
 }
 
-export const bs = <T>(page: Page, fn: string, ...args: unknown[]): Promise<T> =>
-  page.evaluate(([fn, args]) => {
+const debugReady = (page: Page) => page.waitForFunction(() => (window as unknown as { __bs?: unknown }).__bs);
+
+export const bs = async <T>(page: Page, fn: string, ...args: unknown[]): Promise<T> => {
+  await debugReady(page);
+  return page.evaluate(([fn, args]) => {
     const w = window as unknown as { __bs: Record<string, (...a: unknown[]) => unknown> };
     return w.__bs[fn as string]!(...(args as unknown[])) as T;
   }, [fn, args] as const);
+};
 
-export const stateKind = (page: Page): Promise<string> => page.evaluate(() => (window as unknown as { __bs: { state(): { s: string } } }).__bs.state().s);
+export const stateKind = async (page: Page): Promise<string> => {
+  await debugReady(page);
+  return page.evaluate(() => (window as unknown as { __bs: { state(): { s: string } } }).__bs.state().s);
+};
 
 /** Host config is chosen in the lobby. */
 export async function hostLobby(A: Page, mode: 'Classic' | 'Salvo' | 'Items' = 'Classic', extra: string[] = []): Promise<void> {
@@ -37,13 +51,18 @@ export async function hostLobby(A: Page, mode: 'Classic' | 'Salvo' | 'Items' = '
 }
 
 /** Connect A (host) and B (guest) through the two-link direct fallback. */
-export async function connectDirect(A: Page, B: Page, mode: 'Classic' | 'Salvo' | 'Items' = 'Classic', extra: string[] = []): Promise<void> {
+export async function connectDirect(A: Page, B: Page, mode: 'Classic' | 'Salvo' | 'Items' = 'Classic', extra: string[] = [], gapMs = 0): Promise<void> {
   await hostLobby(A, mode, extra);
   await A.click('#use-direct');
   const offer = (await A.locator('#offer-link').textContent())!;
   expect(offer.length).toBeLessThan(220);
   await B.goto('http://' + offer);
   const code = (await B.locator('#answer-code').textContent({ timeout: 15000 }))!;
+  // A human relaying the reply through a messenger.
+  if (gapMs) {
+    await A.waitForTimeout(gapMs);
+    expect(await stateKind(B)).toBe('direct-guest');
+  }
   await A.fill('#paste', code);
   await A.click('#connect');
   await expect(A.locator('.placement')).toBeVisible({ timeout: 20000 });

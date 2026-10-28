@@ -535,8 +535,8 @@ input {
   outline-offset: -1px;
 }
 .cell:focus-visible {
-  outline: 2px solid var(--fg);
-  outline-offset: -2px;
+  outline: 3px solid var(--fg);
+  outline-offset: 1px;
   z-index: 1;
 }
 .cell.sel::before,
@@ -1021,7 +1021,7 @@ input {
   .battle {
     grid-template-columns: max-content auto;
     justify-content: start;
-    grid-template-areas: 'strip strip' 'stall stall' 'target own' 'actions yours' 'theirs yours';
+    grid-template-areas: 'strip strip' 'stall stall' 'target own' 'actions .' 'theirs yours';
     gap: 16px 48px;
   }
   .actions {

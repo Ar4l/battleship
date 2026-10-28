@@ -71,7 +71,8 @@ export function fromChannel(dc: RTCDataChannel, pc: RTCPeerConnection, onClose?:
     const s = pc.connectionState;
     clearTimeout(disc);
     if (s === 'failed' || s === 'closed') t.end(s);
-    else if (s === 'disconnected') disc = window.setTimeout(() => t.end(s), 8000);
+    // Generous: a phone that briefly switches to a messenger drops consent checks.
+    else if (s === 'disconnected') disc = window.setTimeout(() => t.end(s), 20000);
   });
   return new Promise((res) => (dc.readyState === 'open' ? res(t) : (dc.onopen = () => res(t))));
 }

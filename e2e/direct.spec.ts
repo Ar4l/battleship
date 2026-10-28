@@ -95,4 +95,12 @@ test.describe('direct-link fallback (offline-safe)', () => {
     await expect(A.locator('#verdict')).toHaveText('Fleet verified');
     await expect(B.locator('#verdict')).toHaveText('Fleet verified');
   });
+
+  test('the guest waits while the reply travels: host pastes it 35 s later', async ({ browser }) => {
+    test.setTimeout(120_000);
+    const A = await player(browser);
+    const B = await player(browser);
+    await connectDirect(A, B, 'Classic', [], 35_000);
+    await readyBoth(A, B);
+  });
 });

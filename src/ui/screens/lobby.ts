@@ -45,7 +45,7 @@ export function lobbyGuest(ctrl: Controller): Screen {
     const s = ctrl.state;
     if (s.s !== 'lobby-guest') return;
     el.replaceChildren(
-      label('Joining'),
+      label('Game code'),
       h('h2', 'h2', `Joining game ${s.code}…`),
       ...(s.slow
         ? [

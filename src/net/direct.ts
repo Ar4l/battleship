@@ -107,10 +107,10 @@ export async function createDirectGuest(offer: string): Promise<DirectGuest | nu
   const dc = gameChannel(pc);
   const { open, arm } = openOrFail(pc, dc);
   open.catch(() => {});
-  arm(120000);
-  pc.addEventListener('iceconnectionstatechange', () => {
-    if (pc.iceConnectionState === 'checking') arm(15000);
-  });
+  // The guest's ICE starts checking as soon as it has the offer (the host's agent
+  // answers STUN before it has our answer), so there is no signal for "host pasted".
+  // The reply travels by messenger: wait long, rely on connectionState 'failed'.
+  arm(300000);
   await pc.setRemoteDescription(desc);
   await pc.setLocalDescription(await pc.createAnswer());
   await gather(pc);
