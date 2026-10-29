@@ -23,6 +23,11 @@ Tick items (`[x]`) when done and verified. Owner in brackets.
 - [x] Item bar labels fit on narrow phones (11.5px below 380px, no side padding, clipped as a last resort) [ui]
 - [x] Russian placement legend: one non-wrapping group per class, name and ×n first, then its capsules [ui]
 
+## Round 5: orthogonal rules
+- [ ] Replace Mode with independent settings: Fleet (Standard / Russian), Turns (One shot / Salvo / Salvo simultaneous), Items (Off / On, one-shot turns only) [logic + ui]
+- [ ] Russian + Salvo works (Russian drops "hit shoots again" under Salvo); Salvo shots = ships left, capped at 5 [logic]
+- [ ] Simultaneous Salvo: both pick shots at once, resolve when both sent; draw if both fleets sink in the same round; prefire hidden in this mode [logic + ui]
+
 ## UI notes (round 4)
 
 Where the UI differs from UX-SPEC.md, mostly to stay under 44 KB:
