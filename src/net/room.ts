@@ -48,6 +48,9 @@ export function openRoom(role: 'host' | 'guest', code: number, ev: RoomEvents): 
   let transport: Transport | null = null;
   const idle = new Set<string>();
   const t0 = Date.now();
+  /** When the page last went to the background, and when the current room was joined. */
+  let hid = 0;
+  let at = 0;
 
   const leaveRoom = () => {
     room?.leave().catch(() => {});
@@ -62,6 +65,7 @@ export function openRoom(role: 'host' | 'guest', code: number, ev: RoomEvents): 
   const join = async (c: number) => {
     const T = await prefetch();
     if (left) return;
+    at = Date.now();
     T.resumeRelayReconnection();
     const r = (room = T.joinRoom(
       // manualReconnection: Trystero would reopen every tracker socket on each 'online' event,
@@ -73,8 +77,10 @@ export function openRoom(role: 'host' | 'guest', code: number, ev: RoomEvents): 
         onJoinError: (e) => {
           forget(e.peerId);
           // ICE fails before the handshake, so the host can't tell its friend from a
-          // stray peer: it stays in the lobby (the direct link is one tap away).
-          if (!host && !opponent && /after exchanging SDP/.test(e.error)) ev.failed();
+          // stray peer: it stays in the lobby (the direct link is one tap away). A guest
+          // that was in another app meanwhile has a stale handshake, not a blocked
+          // network: it starts a fresh one, and fails only if that fails too.
+          if (!host && !opponent && /after exchanging SDP/.test(e.error)) hid < at ? ev.failed() : restart();
         },
         onPeerHandshake: async (id, send, receive) => {
           const say = (busy: boolean) => send({ r: host ? 'h' : 'g', busy, t: t0 } as never);
@@ -138,6 +144,13 @@ export function openRoom(role: 'host' | 'guest', code: number, ev: RoomEvents): 
     r.onPeerLeave = (id) => (transport && id === opponent ? transport.end('left') : forget(id));
   };
 
+  const restart = () => {
+    if (left || transport) return;
+    leaveRoom();
+    opponent = null;
+    void join(code);
+  };
+
   const reroll = () => {
     if (left) return;
     leaveRoom();
@@ -148,10 +161,20 @@ export function openRoom(role: 'host' | 'guest', code: number, ev: RoomEvents): 
 
   join(code).catch(() => ev.failed());
 
-  // Until connected: hold tracker reconnects while offline, retry at once when back online.
-  const net = (e: Event) => left || transport || void prefetch().then((T) => (e.type == 'offline' ? T.pauseRelayReconnection() : T.resumeRelayReconnection()));
+  // Until connected: hold tracker reconnects while offline or in another app (failed tries
+  // there only grow Trystero's backoff, up to 60 s), retry at once when back.
+  const net = () => left || transport || void prefetch().then((T) => (navigator.onLine && !document.hidden ? T.resumeRelayReconnection() : T.pauseRelayReconnection()));
+  // The host answers an offer for 23 s. A guest away for longer (its offer went out just
+  // before) comes back to a dead handshake that would fail 23 s later, and the next
+  // announce is up to 2 min off: start a fresh one now.
+  const vis = () => {
+    if (document.hidden) hid = Date.now();
+    else if (!host && !hostId && hid && Date.now() - hid > 24e3) restart();
+    net();
+  };
   addEventListener('online', net);
   addEventListener('offline', net);
+  document.addEventListener('visibilitychange', vis);
 
   // The host re-checks while the relays look down, and clears the warning once one is back
   // (sockets that died while the phone was in another app reconnect a moment after it returns).
@@ -171,6 +194,7 @@ export function openRoom(role: 'host' | 'guest', code: number, ev: RoomEvents): 
       clearTimeout(timer);
       removeEventListener('online', net);
       removeEventListener('offline', net);
+      document.removeEventListener('visibilitychange', vis);
       transport?.close();
       leaveRoom();
     },
