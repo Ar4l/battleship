@@ -251,7 +251,7 @@ The full check happens at reveal.
   - Compute `boardCommit = SHA-256("bs4/board" ‖ salt ‖ config ‖ fleet)` and `coinCommit = SHA-256("bs1/coin" ‖ nonce)`.
   - `config` is the 5 CONFIG body bytes (flags, timer, size, island seed). It binds the board to the full rules, board size and islands in force.
   - Send READY. The local fleet then locks and cannot be changed.
-- **Coin (game 1):** after both READYs, each side sends COIN. The receiver checks `SHA-256("bs1/coin" ‖ nonce) == coinCommit`, and a mismatch means `notice('invalid-move')`. The starter is chosen by `(nonceHost[0] ^ nonceGuest[0]) & 1`: 0 means the host starts. Show the result for 1.2 s ("You go first" / "They go first") as a strip message, then the battle begins.
+- **Coin (game 1):** after both READYs, each side sends COIN. The receiver checks `SHA-256("bs1/coin" ‖ nonce) == coinCommit`, and a mismatch means `notice('invalid-move')`. The starter is chosen by `(nonceHost[0] ^ nonceGuest[0]) & 1`: 0 means the host starts. Show the result for 1.2 s ("You go first" / "They go first"; "Fire together" in simultaneous salvo, with no coin-toss announcement) as a strip message, then the battle begins.
 - **Rematch:** new salt and new commit. The coin step is skipped, and the player who did not start the previous game starts.
 - **Transcript:** each side records every attack it made and the answer it received, as `{attack, answerBytes}`.
 - **Game over:** when an ANSWER sinks ship #5, both sides know the game is over. Each sends REVEAL immediately. A loser's client also reveals automatically, with no button.
@@ -280,7 +280,7 @@ Ships are straight, horizontal or vertical. Board size and fleet follow §7.1; C
 - With **Extra shot after a hit** on (Classic and Items, default off), a hit or sunk gives the same player another turn. The turn timer then restarts.
 - A miss passes the turn.
 
-**Settings (protocol 4).** Fleet (Standard / Russian), Turns (One shot / Salvo / Simultaneous salvo) and Items are independent; `normConfig` in `rules.ts` is the one place that fills in what they imply. Russian forces 10×10 and no touching, and "hit shoots again" with one-shot turns only. Items and Extra shot need one-shot turns.
+**Settings (protocol 4).** Fleet (Standard / Russian), Turns (One shot / Salvo / Simultaneous salvo) and Items are independent; `normConfig` in `rules.ts` is the one place that fills in what they imply. The controller keeps the raw picks and derives `config` from them, so an implied rule is released when the setting that implied it is turned off. Russian forces 10×10 and no touching, and "hit shoots again" with one-shot turns only. Items and Extra shot need one-shot turns.
 
 **Salvo.**
 - Shots this turn = `min(5, your ships afloat, untargeted cells)`. Russian (10 ships) starts at 5 too.

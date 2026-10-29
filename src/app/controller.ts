@@ -28,6 +28,8 @@ const doc = typeof document !== 'undefined' ? document : null;
 export class Controller {
   state: AppState = { s: 'home' };
   config: Config = { ...DEFAULT_CONFIG };
+  /** The user's own picks; config is these plus what they imply, so implied rules don't stick. */
+  private picked: Config = { ...DEFAULT_CONFIG };
   role: 'host' | 'guest' = 'host';
   fleet: Fleet;
   /** Salvo selection on the target board. */
@@ -273,7 +275,8 @@ export class Controller {
   // ---------- settings / placement ----------
 
   setConfig(c: Partial<Config>): void {
-    this.config = normConfig({ ...this.config, ...c });
+    // The seed is drawn fresh in hostConfig() whenever the rules go out.
+    this.config = normConfig((this.picked = { ...this.picked, ...c }));
     this.emit();
   }
 
@@ -339,10 +342,12 @@ export class Controller {
     }
     this.hostStartedLast = hostFirst;
     const iStart = hostFirst === host;
-    const banner = iStart ? 'You go first' : 'They go first';
+    // Simultaneous: nobody goes first, both pick at once.
+    const sim = this.config.turns > 1;
+    const banner = sim ? 'Fire together' : iStart ? 'You go first' : 'They go first';
     this.fx = { target: [], own: [] };
     this.set({ s: 'battle', match: createMatch(this.config, this.fleet, iStart), banner });
-    this.onAnnounce(this.gameNo === 1 ? `Coin toss: ${banner.toLowerCase()}.` : `${banner}.`);
+    this.onAnnounce((this.gameNo === 1 && !sim ? 'Coin toss: ' + banner.toLowerCase() : banner) + '.');
     this.timer('banner', 1200, () => this.patch('battle', { banner: undefined }));
     this.turnStarted();
   }
@@ -499,7 +504,7 @@ export class Controller {
         return this.toPlacement();
       case 'config':
         if (this.role === 'guest' && !this.gameNo) {
-          this.config = m.config;
+          this.config = this.picked = m.config;
           this.toPlacement();
         }
         return;
@@ -532,7 +537,7 @@ export class Controller {
         return this.patch('end', { theirVerdict: m.ok });
       case 'rematch':
         if (s.s !== 'end') return;
-        if (m.config && this.role === 'guest') this.config = m.config;
+        if (m.config && this.role === 'guest') this.config = this.picked = m.config;
         s.rematch.them = true;
         return s.rematch.me ? this.toPlacement() : this.emit();
       case 'bye':

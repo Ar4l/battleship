@@ -51,11 +51,14 @@ test.describe('direct-link fallback (offline-safe)', () => {
     await connectDirect(A, B, 'Simultaneous');
     await expect(B.locator('.placement .rules')).toHaveText('Salvo, simultaneous · 10×10 · No timer');
     await readyBoth(A, B);
+    await expect(B.locator('#strip')).toContainText('Fire together');
     for (const p of [A, B]) await expect(p.locator('.strip-main')).toHaveText('Your turn');
     await expect(B.locator('#them-ready')).toHaveText("They're still picking.");
     for (const c of [0, 1, 2, 3, 4]) await targetCell(A, c).click();
     await A.click('#fire');
     await expect(A.locator('.strip-main')).toHaveText('Waiting for them');
+    await expect(A.locator('#fire')).toHaveText('Sent');
+    await expect(targetCell(A, 0)).toHaveClass(/\bsel\b/);
     await expect(B.locator('#them-ready')).toHaveText("They're ready.");
     await expect(B.locator('#clear-queue')).toBeHidden();
     for (const c of [90, 91, 92, 93, 94]) await targetCell(B, c).click();

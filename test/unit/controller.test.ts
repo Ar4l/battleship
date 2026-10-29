@@ -378,6 +378,19 @@ describe('controller over an in-memory transport', () => {
     }
   });
 
+  it('implied rules do not stick once the implying setting is off', () => {
+    const c = new Controller();
+    c.setConfig({ items: true, size: 2 });
+    c.setConfig({ russian: true });
+    expect(c.config).toMatchObject({ noTouch: true, extraShot: true, size: 1 });
+    c.setConfig({ russian: false });
+    expect(c.config).toMatchObject({ noTouch: false, extraShot: false, size: 2, items: true });
+    c.setConfig({ turns: 1 });
+    expect(c.config.items).toBe(false);
+    c.setConfig({ turns: 0 });
+    expect(c.config.items).toBe(true);
+  });
+
   it('rematch: the host changes the rules after the guest already asked', async () => {
     const { H, G } = await connect({});
     await placeAndStart(H, G);

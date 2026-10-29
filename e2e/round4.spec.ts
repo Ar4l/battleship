@@ -83,5 +83,8 @@ test('lobby: Russian locks both switches and the map; Salvo disables extra shot 
   await expect(touch).toBeDisabled(); // still Russian
   await A.getByRole('radio', { name: 'Standard' }).click();
   await expect(touch).toBeEnabled();
+  await expect(touch).not.toBeChecked(); // implied by Russian, never picked
   await expect(A.getByRole('radio', { name: '12×12' })).toBeEnabled();
+  await A.getByRole('radio', { name: 'One shot' }).click();
+  await expect(extra).not.toBeChecked();
 });
