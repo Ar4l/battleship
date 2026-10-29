@@ -285,7 +285,7 @@ export function battle(ctrl: Controller): Screen {
     if (key === actionsKey) return;
     actionsKey = key;
     if (!hasItems) {
-      const fire = !!turns && btn(mm.pending ? 'Sent' : `Fire ${ctrl.sel.length}/${shots}`, () => ctrl.fireSalvo(), 'primary wide', 'fire');
+      const fire = !!turns && btn(mm.pending || mm.round.me ? 'Sent' : `Fire ${ctrl.sel.length}/${shots}`, () => ctrl.fireSalvo(), 'primary wide', 'fire');
       if (fire) fire.disabled = !my || ctrl.sel.length !== shots;
       side.replaceChildren(tally(mm), h('div', 'act', tip || ready || (!fire && h('p', 'small muted rules', rulesLine(mm.config))), fire));
       return;
@@ -380,7 +380,8 @@ export function battle(ctrl: Controller): Screen {
     own.el.classList.toggle('live', theirTurn);
     own.el.classList.toggle('dim', !theirTurn);
     // A sent salvo stays marked until the answer lands.
-    const sent = mm.pending?.k === 'fire' ? mm.pending.cells : ctrl.sel;
+    const out = mm.pending ?? mm.round.me?.[0];
+    const sent = out?.k === 'fire' ? out.cells : ctrl.sel;
     const tm = model(g, mm.target, { sel: sent, preview, lane: item === 1, queue: q, anim: ctrl.fx.target });
     if (atk?.k === 'item' && atk.item === 1) tm.overlay += torpedo(g, [...preview!], atk.b, preview!.size < n);
     target.update(tm);

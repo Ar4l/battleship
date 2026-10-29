@@ -10,7 +10,7 @@ const KB = 1000;
 // items settings, simultaneous salvo) to 44.5 KB after trimming what it could. PLAN.md §12 has
 // the breakdown. The per-file numbers are guard rails with a little slack, so a small CSS
 // change doesn't fail a deploy while the total still fits.
-const BUDGET = { html: 6.0 * KB, entry: 23.6 * KB, trystero: 15.4 * KB, direct: 4.5 * KB, session: 44.5 * KB };
+const BUDGET = { html: 6.0 * KB, entry: 23.6 * KB, trystero: 15.4 * KB, direct: 4.5 * KB, session: 44.6 * KB };
 
 const files = [];
 const walk = (d) => readdirSync(d).forEach((f) => (statSync(join(d, f)).isDirectory() ? walk(join(d, f)) : files.push(join(d, f))));
