@@ -21,7 +21,7 @@ export function installDebug(ctrl: Controller): void {
     myFleet: () => ctrl.fleet,
     seed: (n: number) => {
       ctrl.rng = seededRng(n);
-      if (ctrl.state.s === 'placement') ctrl.setFleet(randomFleet(ctrl.config.noTouch, ctrl.rng));
+      if (ctrl.state.s === 'placement') ctrl.setFleet(randomFleet(ctrl.geo, ctrl.rng));
     },
     setFleet: (f: Controller['fleet']) => ctrl.setFleet(f),
     /** Answer "miss" whenever this cell (e.g. 'E4') is hit. */

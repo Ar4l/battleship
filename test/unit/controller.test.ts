@@ -3,10 +3,10 @@ import { Controller } from '../../src/app/controller';
 import { lie } from '../../src/app/debug';
 import { decode, encode, type Msg } from '../../src/proto/codec';
 import { memoryPair } from '../../src/net/transport';
-import { shipCells, FLEET } from '../../src/game/rules';
+import { shipCells } from '../../src/game/rules';
 import { shotsAllowed, untargeted } from '../../src/game/engine';
 import type { Config, Fleet } from '../../src/game/types';
-import { FLEET_A, FLEET_B } from './helpers';
+import { FLEET_A, FLEET_B, G as G10, cfgOf } from './helpers';
 
 const until = async (f: () => boolean, ms = 3000) => {
   const t0 = Date.now();
@@ -15,7 +15,7 @@ const until = async (f: () => boolean, ms = 3000) => {
     await new Promise((r) => setTimeout(r, 2));
   }
 };
-const shipCellsOf = (f: Fleet) => f.flatMap((s, i) => shipCells(s, FLEET[i]!)!);
+const shipCellsOf = (f: Fleet, g = G10) => f.flatMap((s, i) => shipCells(g, s, i)!);
 
 /** Send a raw message from `c` to its opponent. */
 const raw = (c: Controller, m: Msg) => (c as unknown as { t: { send(u: Uint8Array): void } }).t.send(encode(m));
@@ -31,9 +31,11 @@ async function connect(config: Partial<Config>) {
   return { H, G };
 }
 
-async function placeAndStart(H: Controller, G: Controller) {
-  H.setFleet(FLEET_A);
-  G.setFleet(FLEET_B);
+async function placeAndStart(H: Controller, G: Controller, fixed = true) {
+  if (fixed) {
+    H.setFleet(FLEET_A);
+    G.setFleet(FLEET_B);
+  }
   await H.ready();
   await G.ready();
   await until(() => H.state.s === 'battle' && G.state.s === 'battle');
@@ -41,7 +43,7 @@ async function placeAndStart(H: Controller, G: Controller) {
 
 /** The player on turn sinks the other, the other always misses. */
 async function playOut(H: Controller, G: Controller, settle = true) {
-  const fleets = new Map([[H, FLEET_A], [G, FLEET_B]]);
+  const fleets = new Map([[H, H.fleet], [G, G.fleet]]);
   for (let guard = 0; guard < 400; guard++) {
     if (H.state.s === 'end' && G.state.s === 'end') break;
     const me = H.match?.phase === 'myTurn' ? H : G.match?.phase === 'myTurn' ? G : null;
@@ -51,8 +53,8 @@ async function playOut(H: Controller, G: Controller, settle = true) {
     }
     const m = me.match!;
     const winner = me === H;
-    const theirs = shipCellsOf(fleets.get(me === H ? G : H)!).filter((c) => !m.target.shot.has(c));
-    const free = untargeted(m.target).filter((c) => !theirs.includes(c));
+    const theirs = shipCellsOf(fleets.get(me === H ? G : H)!, m.geo).filter((c) => !m.target.shot.has(c));
+    const free = untargeted(m).filter((c) => !theirs.includes(c));
     const n = shotsAllowed(m, 'me');
     const pool = winner ? [...theirs, ...free] : [...free, ...theirs];
     expect(me.attack({ k: 'fire', cells: pool.slice(0, n) })).toBe(true);
@@ -87,6 +89,66 @@ describe('controller over an in-memory transport', () => {
     await until(() => H.state.s === 'placement' && G.state.s === 'placement');
     await placeAndStart(H, G);
     expect(H.match!.iStarted).toBe(!hostStarted);
+  });
+
+  it.each([
+    ['Russian', { mode: 3 } as const],
+    ['Large Items with islands and extra shot', { mode: 2, size: 2, extraShot: true } as const],
+    ['Huge Salvo', { mode: 1, size: 3 } as const],
+    ['Small Classic', { size: 0 } as const],
+  ])('plays a %s game to a verified verdict; both sides agree on the board', async (_, cfg) => {
+    const { H, G } = await connect(cfg);
+    expect(G.config).toEqual(H.config);
+    await placeAndStart(H, G, false);
+    const g = H.match!.geo;
+    expect(G.match!.geo).toBe(g);
+    if ((cfg as Partial<Config>).size === 2) expect(g.islands.size).toBeGreaterThan(0);
+    await playOut(H, G);
+    expect([(H.state as { verdict: string }).verdict, (G.state as { verdict: string }).verdict]).toEqual(['verified', 'verified']);
+    // The host rolls new islands for the rematch and the guest follows.
+    const seed = H.config.seed;
+    H.rematch();
+    G.rematch();
+    await until(() => H.state.s === 'placement' && G.state.s === 'placement');
+    expect(G.config.seed).toBe(H.config.seed);
+    expect(H.config.seed === seed && H.config.seed === 0).toBe(false);
+  });
+
+  it('prefire: a shot queued during their turn fires as my turn starts', async () => {
+    const { H, G } = await connect({ mode: 2 });
+    await placeAndStart(H, G);
+    const [me, them] = H.match!.phase === 'theirTurn' ? [H, G] : [G, H];
+    them.prefire(50); // not their phase: ignored
+    expect(them.queue).toEqual([]);
+    me.prefire(55);
+    me.prefire(44); // one shot outside Salvo: replaces
+    expect(me.queue).toEqual([44]);
+    me.prefire(44);
+    expect(me.queue).toEqual([]);
+    me.prefire(66);
+    them.attack({ k: 'fire', cells: [98] });
+    await until(() => me.match!.phase === 'theirTurn' && them.match!.phase === 'myTurn');
+    expect(me.match!.target.shot.has(66)).toBe(true);
+    expect(me.queue).toEqual([]);
+  });
+
+  it('prefire in Salvo: up to my shots; too few become the selection; fired cells are dropped', async () => {
+    const { H, G } = await connect({ mode: 1 });
+    await placeAndStart(H, G);
+    const [me, them] = H.match!.phase === 'theirTurn' ? [H, G] : [G, H];
+    for (const c of [90, 91, 92, 93, 94, 95]) me.prefire(c);
+    expect(me.queue).toEqual([90, 91, 92, 93, 94]);
+    them.attack({ k: 'fire', cells: [97, 96, 95, 94, 93] });
+    await until(() => me.match!.phase === 'theirTurn' && them.match!.phase === 'myTurn');
+    expect([90, 91, 92, 93, 94].every((c) => me.match!.target.shot.has(c))).toBe(true);
+    // Next their turn: queue 2, one of them already fired at (dropped), the other is preselected.
+    me.prefire(90);
+    me.prefire(80);
+    expect(me.queue).toEqual([80]);
+    them.attack({ k: 'fire', cells: [87, 86, 85, 84, 83] });
+    await until(() => me.match!.phase === 'myTurn');
+    expect(me.sel).toEqual([80]);
+    expect(me.queue).toEqual([]);
   });
 
   it('plays an Items game using every item', async () => {
@@ -162,8 +224,8 @@ describe('controller over an in-memory transport', () => {
     await placeAndStart(H, G);
     const me = H.match!.phase === 'myTurn' ? H : G;
     const them = me === H ? G : H;
-    const ships = (me === H ? FLEET_B : FLEET_A).flatMap((s, i) => shipCells(s, FLEET[i]!)!);
-    expect(me.attack({ k: 'fire', cells: [ships[0]!, ...untargeted(me.match!.target).filter((c) => !ships.includes(c)).slice(0, 4)] })).toBe(true);
+    const ships = (me === H ? FLEET_B : FLEET_A).flatMap((s, i) => shipCells(G10, s, i)!);
+    expect(me.attack({ k: 'fire', cells: [ships[0]!, ...untargeted(me.match!).filter((c) => !ships.includes(c)).slice(0, 4)] })).toBe(true);
     await until(() => me.match!.phase !== 'awaitingAnswer');
     expect(me.lastResult).toBe(`You hit ${'ABCDEFGHIJ'[ships[0]! % 10]}${Math.floor(ships[0]! / 10) + 1}`);
     expect(them.lastResult).toBe(me.lastResult.replace('You', 'They'));
@@ -175,7 +237,7 @@ describe('controller over an in-memory transport', () => {
     raw(H, { t: 'reveal', salt: new Uint8Array(16), fleet: FLEET_A });
     await until(() => G.state.s === 'end');
     expect(G.match!.winner).toBe('me');
-    raw(H, { t: 'config', config: { mode: 2, extraShot: false, noTouch: true, timer: 0 } });
+    raw(H, { t: 'config', config: cfgOf({ mode: 2, noTouch: true }) });
     await new Promise((r) => setTimeout(r, 20));
     expect(G.state.s).toBe('end');
     expect(G.config.mode).toBe(0);

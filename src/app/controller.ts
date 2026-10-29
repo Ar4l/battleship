@@ -1,9 +1,9 @@
-import { cellName } from '../game/board';
+import { cellName as name } from '../game/board';
 import { bytesEqual, commitBoard, commitCoin, hostStarts, randomBytes } from '../game/commit';
 import { applyAnswer, createMatch, localAttack, remoteAttack, shotsAllowed, untargeted, type Match } from '../game/engine';
 import { cryptoRng, randomFleet } from '../game/random';
-import { DEFAULT_CONFIG, SHIP_NAMES, configFlags, fleetLegal } from '../game/rules';
-import type { Answer, Attack, Config, Fleet, Rng } from '../game/types';
+import { DEFAULT_CONFIG, fleetLegal, geoOf, normConfig } from '../game/rules';
+import type { Answer, Attack, Config, Fleet, Geo, Rng } from '../game/types';
 import { verifyOpponent } from '../game/verify';
 import { PROTO_VERSION, decode, encode, type Msg } from '../proto/codec';
 import type { RoomEvents } from '../net/room';
@@ -32,6 +32,8 @@ export class Controller {
   fleet: Fleet;
   /** Salvo selection on the target board. */
   sel: number[] = [];
+  /** Prefire: shots queued during their turn, fired as my turn starts (see prefire). */
+  queue: number[] = [];
   /** Most recent result, for the status strip. */
   lastResult = '';
   /** Cells to animate on next render. */
@@ -70,7 +72,12 @@ export class Controller {
   private heard = 0;
 
   constructor(private net: NetDeps = {}) {
-    this.fleet = randomFleet(false, this.rng);
+    this.fleet = randomFleet(this.geo, this.rng);
+  }
+
+  /** Board size, fleet and islands of the current config (placement uses this; a match has its own m.geo). */
+  get geo(): Geo {
+    return geoOf(this.config);
   }
 
   subscribe(f: () => void): void {
@@ -264,9 +271,13 @@ export class Controller {
   // ---------- settings / placement ----------
 
   setConfig(c: Partial<Config>): void {
-    this.config = { ...this.config, ...c };
-    if (this.config.mode) this.config.extraShot = false;
+    this.config = normConfig({ ...this.config, ...c });
     this.emit();
+  }
+
+  /** Host: new islands for every game. */
+  private hostConfig(): Config {
+    return (this.config = { ...this.config, seed: this.rng(65536) });
   }
 
   setFleet(f: Fleet): void {
@@ -277,12 +288,13 @@ export class Controller {
   }
 
   randomize(): void {
-    this.setFleet(randomFleet(this.config.noTouch, this.rng));
+    this.setFleet(randomFleet(this.geo, this.rng));
   }
 
   private toPlacement(): void {
     this.timer('reveal');
-    this.fleet = randomFleet(this.config.noTouch, this.rng);
+    this.fleet = randomFleet(this.geo, this.rng);
+    this.queue = [];
     this.theirBoard = this.theirCoin = this.theirNonce = null;
     this.sentCoin = this.revealed = false;
     this.sel = [];
@@ -293,11 +305,11 @@ export class Controller {
 
   async ready(): Promise<void> {
     const s = this.state;
-    if (s.s !== 'placement' || s.ready.me || this.readying || !fleetLegal(this.fleet, this.config.noTouch)) return;
+    if (s.s !== 'placement' || s.ready.me || this.readying || !fleetLegal(this.geo, this.fleet)) return;
     this.readying = true;
     const salt = randomBytes(16);
     const nonce = randomBytes(16);
-    const board = await commitBoard(salt, this.fleet, configFlags(this.config));
+    const board = await commitBoard(salt, this.fleet, this.config);
     const coin = await commitCoin(nonce);
     this.readying = false;
     if (this.state !== s) return;
@@ -349,6 +361,26 @@ export class Controller {
     this.emit();
   }
 
+  /**
+   * Prefire, during their turn: toggle a queued shot. Salvo queues up to the
+   * shots I'll have; other modes queue one normal shot (a new pick replaces it).
+   * Purely local: nothing is sent until my turn starts.
+   */
+  prefire(cell: number): void {
+    const m = this.match;
+    if (!m || m.phase !== 'theirTurn' || !(cell >= 0 && cell < m.geo.n ** 2) || m.target.shot.has(cell)) return;
+    const q = this.queue;
+    const i = q.indexOf(cell);
+    if (i >= 0) q.splice(i, 1);
+    else if (m.config.mode !== 1) this.queue = [cell];
+    else if (q.length < shotsAllowed(m, 'me')) q.push(cell);
+    this.emit();
+  }
+  clearPrefire(): void {
+    this.queue = [];
+    this.emit();
+  }
+
   attack(a: Attack): boolean {
     const s = this.state;
     if (s.s !== 'battle' || s.match.phase !== 'myTurn') return false;
@@ -384,6 +416,15 @@ export class Controller {
     this.timer('stall');
     if (doc) doc.title = mine ? 'Your turn · Battleship' : 'Battleship';
     if (mine) this.onSfx('turn');
+    if (mine && this.queue.length) {
+      // Prefire: drop cells that can't be fired at any more and shots I no longer have.
+      const n = shotsAllowed(m, 'me');
+      const q = this.queue.filter((c) => !m.target.shot.has(c)).slice(0, n);
+      this.queue = [];
+      if (q.length === n && this.attack({ k: 'fire', cells: q })) return;
+      // Salvo, not enough queued: they become the selection.
+      if (m.config.mode === 1) this.sel = q;
+    }
     if (!secs) return;
     this.deadline = Date.now() + secs;
     if (mine) this.timer('turn', secs, () => this.autoAct());
@@ -395,16 +436,18 @@ export class Controller {
     const m = this.match;
     if (!m || m.phase !== 'myTurn') return;
     const cells = m.config.mode === 1 ? this.sel.slice() : [];
-    const free = untargeted(m.target).filter((c) => !cells.includes(c));
+    const free = untargeted(m).filter((c) => !cells.includes(c));
     while (cells.length < shotsAllowed(m, 'me') && free.length) cells.push(free.splice(this.rng(free.length), 1)[0]!);
     this.timedOut = this.attack({ k: 'fire', cells });
   }
 
   private describe(a: Answer, mine: boolean): string {
     const who = mine ? 'You' : 'They';
+    const g = this.match!.geo;
+    const cellName = (c: number) => name(c, g.n);
     if (a.k === 'sonar') return mine ? `Sonar: ${a.count} ship cell${a.count === 1 ? '' : 's'}` : 'They used sonar';
     const e = a.entries;
-    const sunk = e.filter((x) => x.code > 1).map((x) => SHIP_NAMES[x.code - 2]);
+    const sunk = e.filter((x) => x.code > 1).map((x) => g.names[x.code - 2]);
     if (sunk.length) return `${who} sank ${mine ? 'their' : 'your'} ${sunk.join(' and ')}`;
     if (!e.length) return `${mine ? 'Your' : 'Their'} torpedo ran clean`;
     const hits = e.filter((x) => x.code).map((x) => cellName(x.cell));
@@ -427,7 +470,7 @@ export class Controller {
         if (this.role === 'guest') return this.hello();
         if (this.gotHello) return;
         this.gotHello = true;
-        this.send({ t: 'config', config: this.config });
+        this.send({ t: 'config', config: this.hostConfig() });
         return this.toPlacement();
       case 'config':
         if (this.role === 'guest' && !this.gameNo) {
@@ -511,6 +554,7 @@ export class Controller {
   private toEnd(match: Match, verdict: 'pending' | 'cheat', reason?: string): void {
     for (const n of ['turn', 'stall', 'banner']) this.timer(n);
     this.deadline = 0;
+    this.queue = [];
     match.phase = 'over';
     if (doc) doc.title = 'Battleship';
     this.set({ s: 'end', match, verdict, reason, theirVerdict: null, rematch: { me: false, them: false }, peerLeft: false });
@@ -561,7 +605,7 @@ export class Controller {
     if (s.s !== 'end' || s.rematch.me || s.peerLeft) return;
     s.rematch.me = true;
     s.editing = false;
-    this.send(this.role === 'host' ? { t: 'rematch', config: this.config } : { t: 'rematch' });
+    this.send(this.role === 'host' ? { t: 'rematch', config: this.hostConfig() } : { t: 'rematch' });
     if (s.rematch.them) this.toPlacement();
     else this.emit();
   }

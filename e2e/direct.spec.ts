@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { bs, connectDirect, playOut, player, readyBoth, waitTurn, targetCell } from './util';
+import { bs, connectDirect, fleetCells, myTurn, playOut, player, readyBoth, waitTurn, targetCell } from './util';
 
 test.describe('direct-link fallback (offline-safe)', () => {
   test('Classic: full game, verified on both sides, then rematch swaps the starter', async ({ browser }) => {
@@ -41,6 +41,23 @@ test.describe('direct-link fallback (offline-safe)', () => {
     await expect(other.locator('.strip-sub')).toHaveText(/^(They hit [A-J]\d+|They missed all 5|They sank)/);
     await playOut(A, B, B, 'salvo');
     await expect(B.locator('#result')).toHaveText('You won');
+    await expect(A.locator('#verdict')).toHaveText('Fleet verified');
+    await expect(B.locator('#verdict')).toHaveText('Fleet verified');
+  });
+
+  test('Russian: ten ships, a hit shoots again, verified at the end', async ({ browser }) => {
+    const A = await player(browser);
+    const B = await player(browser);
+    await connectDirect(A, B, 'Russian');
+    await expect(A.locator('.dock-ship')).toHaveCount(10);
+    await expect(B.locator('.rules')).toContainText('Russian');
+    await readyBoth(A, B);
+    const first = (await waitTurn(A, B))!;
+    const theirs = fleetCells(await bs<{ anchor: number; vertical: boolean }[]>(first === A ? B : A, 'myFleet'), [4, 3, 3, 2, 2, 2, 1, 1, 1, 1]);
+    await targetCell(first, theirs[0]!).click();
+    await expect.poll(() => myTurn(first)).toBe(true);
+    await playOut(A, B, first);
+    await expect(first.locator('#result')).toHaveText('You won');
     await expect(A.locator('#verdict')).toHaveText('Fleet verified');
     await expect(B.locator('#verdict')).toHaveText('Fleet verified');
   });

@@ -25,8 +25,8 @@ export function end(ctrl: Controller): Screen {
     const s = ctrl.state;
     if (s.s !== 'end') return;
     const m = s.match;
-    target.update(model(m.target, { reveal: s.theirFleet }));
-    own.update(model(m.own, { own: m.fleet }));
+    target.update(model(m.geo, m.target, { reveal: s.theirFleet }));
+    own.update(model(m.geo, m.own, { own: m.fleet }));
     const key = JSON.stringify([s.verdict, s.reason, s.theirVerdict, s.rematch, s.peerLeft, s.editing, !!s.theirFleet, ctrl.config]);
     if (key === lastKey) return;
     lastKey = key;

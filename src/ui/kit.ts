@@ -73,7 +73,7 @@ const toggle = (text: string, checked: boolean, onChange: (v: boolean) => void, 
     h('span', null, text),
   );
 
-const MODE_DESC = ['One shot per turn.', 'Fire one shot for each ship you have left.', 'Earn energy each turn and spend it on sonar, torpedoes and bombs.'];
+const MODE_DESC = ['One shot per turn.', 'Fire one shot for each ship you have left.', 'Earn energy each turn and spend it on sonar, torpedoes and bombs.', "Морской бой: ten ships that can't touch. A hit shoots again."];
 
 /** Mode, toggles and timer. Calls onChange with a partial config. */
 export function settings(c: Config, onChange: (p: Partial<Config>) => void): HTMLElement {
@@ -89,14 +89,14 @@ export function settings(c: Config, onChange: (p: Partial<Config>) => void): HTM
         'div',
         'opt',
         label('Mode'),
-        segmented('Mode', MODE_NAMES.map((n, i) => [i as Mode, n]), c.mode, (mode) => set({ mode, extraShot: false }, true)),
+        segmented('Mode', MODE_NAMES.map((n, i) => [i as Mode, n]), c.mode, (mode) => set({ mode, extraShot: mode === 3, noTouch: mode === 3 || c.noTouch }, true)),
         h('p', 'small muted', MODE_DESC[c.mode]),
       ),
       h(
         'div',
         null,
-        toggle('Extra shot after a hit', c.extraShot, (extraShot) => set({ extraShot }), c.mode > 0),
-        toggle("Ships can't touch", c.noTouch, (noTouch) => set({ noTouch })),
+        toggle('Extra shot after a hit', c.extraShot, (extraShot) => set({ extraShot }), c.mode === 1 || c.mode === 3),
+        toggle("Ships can't touch", c.noTouch, (noTouch) => set({ noTouch }), c.mode === 3),
       ),
       h(
         'div',

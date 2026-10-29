@@ -1,9 +1,8 @@
 import type { Controller } from '../../app/controller';
 import { cellName } from '../../game/board';
 import { shotsAllowed, type BoardView, type Match } from '../../game/engine';
-import { ENERGY_CAP, ITEMS, clampLine, clampSonar, footprint, itemParamsValid } from '../../game/items';
-import { FLEET, SHIP_NAMES } from '../../game/rules';
-import type { Attack, Fleet, ItemId } from '../../game/types';
+import { ENERGY_CAP, ITEMS, clampAirstrike, clampLine, clampSonar, footprint, itemParamsValid } from '../../game/items';
+import type { Attack, Fleet, Geo, ItemId } from '../../game/types';
 import { board, capsule, cellsOf, hit, knownDot, last, miss, sonarBox, sunk, type BoardModel } from '../grid';
 import { h } from '../h';
 import { btn, label, type Screen } from '../kit';
@@ -15,17 +14,18 @@ export const cap = (text: string) => h('div', 'cap label', text);
  * Classes, labels and overlay for a board. `own`: my fleet on my board.
  * `reveal`: their fleet after the game.
  */
-export function model(b: BoardView, o: { own?: Fleet; reveal?: Fleet; sel?: number[]; preview?: Set<number>; anim?: number[] } = {}): BoardModel {
+export function model(g: Geo, b: BoardView, o: { own?: Fleet; reveal?: Fleet; sel?: number[]; preview?: Set<number>; anim?: number[] } = {}): BoardModel {
   const occ: number[] = [];
   const sunkAt: number[] = [];
   const delay = new Map((o.anim ?? []).map((c, i) => [c, i * 80]));
   const cls: string[] = [];
   const labels: string[] = [];
   let ov = '';
-  o.own?.forEach((s, i) => cellsOf(s, i).forEach((c) => (occ[c] = i)));
-  b.sunk.forEach((s, i) => s && cellsOf(s, i).forEach((c) => (sunkAt[c] = i)));
-  (o.own ?? o.reveal)?.forEach((s, i) => (o.own || !b.sunk[i]) && (ov += capsule(s, i, o.own ? 'own' : 'reveal')));
-  for (let c = 0; c < 100; c++) {
+  const SHIP_NAMES = g.names;
+  o.own?.forEach((s, i) => cellsOf(g, s, i).forEach((c) => (occ[c] = i)));
+  b.sunk.forEach((s, i) => s && cellsOf(g, s, i).forEach((c) => (sunkAt[c] = i)));
+  (o.own ?? o.reveal)?.forEach((s, i) => (o.own || !b.sunk[i]) && (ov += capsule(s, g.fleet[i]!, o.own ? 'own' : 'reveal')));
+  for (let c = 0; c < g.n ** 2; c++) {
     const shot = b.shot.has(c);
     const isHit = b.hit.has(c);
     const known = b.known.has(c);
@@ -33,13 +33,13 @@ export function model(b: BoardView, o: { own?: Fleet; reveal?: Fleet; sel?: numb
     const name = SHIP_NAMES[occ[c]!];
     cls.push([shot && 'shot', known && !isHit && 'known', sel && 'sel', o.preview?.has(c) && 'pv'].filter(Boolean).join(' '));
     labels.push(
-      `${cellName(c)}, ${sunkAt[c] !== undefined ? 'sunk ' + SHIP_NAMES[sunkAt[c]!] : isHit ? (name ? name + ' hit' : 'hit') : known ? 'known water' : shot ? 'miss' : name || (o.own ? 'water' : 'unknown')}${sel ? ', selected' : ''}`,
+      `${cellName(c, g.n)}, ${sunkAt[c] !== undefined ? 'sunk ' + SHIP_NAMES[sunkAt[c]!] : isHit ? (name ? name + ' hit' : 'hit') : known ? 'known water' : shot ? 'miss' : name || (o.own ? 'water' : 'unknown')}${sel ? ', selected' : ''}`,
     );
     const a = delay.get(c) ?? -1;
     if (known && !isHit) ov += knownDot(c);
     else if (shot) ov += isHit ? hit(c, a, !!o.own) : miss(c, a);
   }
-  b.sunk.forEach((s, i) => s && (ov += sunk(s, i, cellsOf(s, i).some((c) => delay.has(c)))));
+  b.sunk.forEach((s, i) => s && (ov += sunk(s, g.fleet[i]!, cellsOf(g, s, i).some((c) => delay.has(c)))));
   for (const s of b.sonar) ov += sonarBox(s.a, s.count);
   // Not inside a sunk ship's outline: the marker would split the capsule.
   for (const c of b.last) if (b.shot.has(c) && sunkAt[c] === undefined) ov += last(c);
@@ -47,7 +47,7 @@ export function model(b: BoardView, o: { own?: Fleet; reveal?: Fleet; sel?: numb
 }
 
 /** Fleet status. For theirs only sunk is known; for mine segments fill as hit. */
-const fleetList = (title: string, b: BoardView, mine?: Fleet) =>
+const fleetList = (g: Geo, title: string, b: BoardView, mine?: Fleet) =>
   h(
     'div',
     'fleet',
@@ -55,13 +55,13 @@ const fleetList = (title: string, b: BoardView, mine?: Fleet) =>
     h(
       'ul',
       null,
-      SHIP_NAMES.map((name, i) => {
-        const cells = mine ? cellsOf(mine[i]!, i) : [];
+      g.names.map((name, i) => {
+        const cells = mine ? cellsOf(g, mine[i]!, i) : [];
         return h(
           'li',
           { cls: b.sunk[i] ? 'is-sunk' : '' },
           h('span', null, name, b.sunk[i] && h('span', 'sr-only', ', sunk')),
-          h('span', { cls: 'segs', 'aria-hidden': 'true' }, Array.from({ length: FLEET[i]! }, (_, k) => h('i', { cls: b.hit.has(cells[k]!) ? 'hit' : '' }))),
+          h('span', { cls: 'segs', 'aria-hidden': 'true' }, Array.from({ length: g.fleet[i]! }, (_, k) => h('i', { cls: b.hit.has(cells[k]!) ? 'hit' : '' }))),
         );
       }),
     ),
@@ -83,21 +83,25 @@ export function battle(ctrl: Controller): Screen {
     armed = hover = null;
     render();
   };
-  const dirName = () => (item === 1 ? ['from left', 'from right', 'from top', 'from bottom'][dir % 4] : item === 3 && (dir % 2 ? 'vertical' : 'horizontal'));
+  const dirName = () => (item === 1 ? ['from left', 'from right', 'from top', 'from bottom'][dir % 4] : (item === 3 || item === 4) && (dir % 2 ? (item === 3 ? 'vertical' : 'rising') : item === 3 ? 'horizontal' : 'falling'));
 
   const itemAttack = (cell: number): Attack | null => {
     if (item === null) return null;
     let a = cell;
     let b = 0;
-    if (item === 0) a = clampSonar(cell);
+    const g = m().geo;
+    if (item === 0) a = clampSonar(g, cell);
     else if (item === 1) {
       b = dir % 4;
-      a = b < 2 ? (cell - (cell % 10)) / 10 : cell % 10;
+      a = b < 2 ? (cell - (cell % g.n)) / g.n : cell % g.n;
     } else if (item === 3) {
       b = dir % 2;
-      a = clampLine(cell, b === 1);
+      a = clampLine(g, cell, b === 1);
+    } else if (item === 4) {
+      b = dir % 2;
+      a = clampAirstrike(g, cell);
     }
-    return itemParamsValid(item, a, b) && !footprint(item, a, b).every((c) => m().target.shot.has(c)) ? { k: 'item', item, a, b } : null;
+    return itemParamsValid(g, item, a, b) && !footprint(g, item, a, b).every((c) => m().target.shot.has(c)) ? { k: 'item', item, a, b } : null;
   };
 
   const activate = (cell: number, touch: boolean) => {
@@ -252,14 +256,14 @@ export function battle(ctrl: Controller): Screen {
     const dn = dirName();
     stripSub.textContent = s.banner ? '' : armed !== null && my ? 'Tap again to fire' + (dn ? ', ' + dn : '') : ctrl.lastResult;
     const atk = hover === null ? null : itemAttack(hover);
-    const preview = atk?.k === 'item' ? new Set(footprint(atk.item, atk.a, atk.b)) : undefined;
+    const preview = atk?.k === 'item' ? new Set(footprint(mm.geo, atk.item, atk.a, atk.b)) : undefined;
     target.el.classList.toggle('armed', my);
-    target.update(model(mm.target, { sel: ctrl.sel, preview, anim: ctrl.fx.target }));
-    own.update(model(mm.own, { own: mm.fleet, anim: ctrl.fx.own }));
+    target.update(model(mm.geo, mm.target, { sel: ctrl.sel, preview, anim: ctrl.fx.target }));
+    own.update(model(mm.geo, mm.own, { own: mm.fleet, anim: ctrl.fx.own }));
     ctrl.fx = { target: [], own: [] };
     renderActions(mm);
-    theirs.replaceChildren(fleetList('Enemy ships', mm.target));
-    yours.replaceChildren(fleetList('Your ships', mm.own, mm.fleet));
+    theirs.replaceChildren(fleetList(mm.geo, 'Enemy ships', mm.target));
+    yours.replaceChildren(fleetList(mm.geo, 'Your ships', mm.own, mm.fleet));
     stall.replaceChildren(s.stalled ? h('div', 'callout', h('p', null, "Opponent isn't responding."), btn('Leave', () => ctrl.leaveStalled(), 'primary')) : '');
     runTimer(mm);
   }

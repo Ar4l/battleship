@@ -1,5 +1,5 @@
-import { FLEET, shipCells } from '../game/rules';
-import type { Ship } from '../game/types';
+import { shipCells } from '../game/rules';
+import type { Geo, Ship } from '../game/types';
 import { h } from './h';
 
 export interface BoardOpts {
@@ -129,7 +129,7 @@ function shipRect(ship: Ship, len: number, cls: string, inset: number, round = t
   const hh = ship.vertical ? len : 1;
   return rect(cls, x(c) + inset, y(c) + inset, w - 2 * inset, hh - 2 * inset, round ? ` rx="${0.5 - inset}"` : ' pathLength="100"');
 }
-export const capsule = (ship: Ship, i: number, cls: string) => shipRect(ship, FLEET[i]!, cls, 0.14);
+export const capsule = (ship: Ship, len: number, cls: string) => shipRect(ship, len, cls, 0.14);
 
 /** `anim` is the stagger delay in ms, or -1 for no animation. */
 export const miss = (c: number, anim = -1) => dot('miss', c, 0.14) + (anim < 0 ? '' : dot('ring', c, 0.36, delay(anim)));
@@ -137,9 +137,9 @@ export const miss = (c: number, anim = -1) => dot('miss', c, 0.14) + (anim < 0 ?
 export const hit = (c: number, anim = -1, round = false) => square('hit' + (anim < 0 ? '' : ' pop'), c, 0.18, delay(anim) + (round ? ' rx=".23"' : ''));
 export const knownDot = (c: number) => dot('kdot', c, 0.07);
 export const last = (c: number) => square('last', c, 0.07);
-export const sunk = (ship: Ship, i: number, anim: boolean) =>
-  shipRect(ship, FLEET[i]!, 'hatch' + (anim ? ' fade' : ''), 0.04, false) + shipRect(ship, FLEET[i]!, 'sunk' + (anim ? ' draw' : ''), 0.04, false);
+export const sunk = (ship: Ship, len: number, anim: boolean) =>
+  shipRect(ship, len, 'hatch' + (anim ? ' fade' : ''), 0.04, false) + shipRect(ship, len, 'sunk' + (anim ? ' draw' : ''), 0.04, false);
 export const sonarBox = (a: number, count: number) =>
   rect('sonar', x(a) - 0.96, y(a) - 0.96, 2.92, 2.92) + `<text class="sonar-n" x="${x(a) - 0.86}" y="${y(a) - 0.5}">${count}</text>`;
 
-export const cellsOf = (ship: Ship, i: number): number[] => shipCells(ship, FLEET[i]!) ?? [];
+export const cellsOf = (g: Geo, ship: Ship, i: number): number[] => shipCells(g, ship, i) ?? [];

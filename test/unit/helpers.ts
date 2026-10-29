@@ -15,3 +15,10 @@ export const FLEET_B: Fleet = [
   { anchor: 3, vertical: true },
   { anchor: 1, vertical: true },
 ];
+
+import { DEFAULT_CONFIG, geoOf } from '../../src/game/rules';
+import type { Config } from '../../src/game/types';
+export const cfgOf = (c: Partial<Config> = {}): Config => ({ ...DEFAULT_CONFIG, ...c });
+/** Classic 10×10 board, and the same with no-touch. */
+export const G = geoOf(DEFAULT_CONFIG);
+export const GT = geoOf(cfgOf({ noTouch: true }));

@@ -6,7 +6,7 @@ Two-player Battleship that runs peer-to-peer in the browser. There is no server:
 
 - **Create game** gives a 4-digit code and a link (`aral.cc/battleship/#4821`). Your friend opens the link or types the code.
 - If matchmaking can't connect, use **Use a direct link**: send the link, your friend sends a reply link back, paste it, connect.
-- Modes: **Classic** (optional extra shot after a hit), **Salvo** (one shot per ship you have left) and **Items** (energy for Sonar, Torpedo, Cross bomb and Line strike). Options: ships can't touch, turn timer.
+- Modes: **Classic** (optional extra shot after a hit), **Salvo** (one shot per ship you have left), **Items** (energy for Sonar, Torpedo, Cross bomb, Airstrike and Line strike) and **Russian** (Морской бой: 1×4, 2×3, 3×2, 4×1, no touching, a hit shoots again). Board sizes 8×8 to 14×14; Large and Huge have islands. Options: extra shot after a hit, ships can't touch, turn timer. Prefire: queue your next shot during the opponent's turn.
 - Fair play: each player commits to `SHA-256(salt, fleet, rules)` before the game and reveals at the end. Every answer the opponent gave is replayed against the revealed fleet; a lie is reported with the cell it happened on.
 
 ## Develop

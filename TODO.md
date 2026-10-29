@@ -1,0 +1,62 @@
+# TODO
+
+Tick items (`[x]`) when done and verified. Owner in brackets.
+
+## Carried over
+- [x] Guest switching apps mid-join gets a false "Couldn't connect" (half-done in `src/net/room.ts`) [logic]
+- [ ] Large phones in landscape (≥900×≤500) get the desktop layout and scroll sideways [ui]
+
+## Gameplay
+- [x] Cross bomb can't be aimed at an already-hit square — allow it (skip already-revealed cells; block only if nothing new would be hit) [logic]
+- [ ] Add Airstrike item [logic + ui] — logic done: item 4, cost 4, 5 cells on a diagonal
+- [ ] "Extra shot after a hit" also available in Items mode [logic + ui] — logic done (the Settings toggle is already enabled for Items)
+- [ ] Prefire: queue your next shot(s) during the opponent's turn; fires when your turn starts [logic + ui] — logic done
+- [ ] Map size choice; larger maps get islands (no ships on them, torpedoes stop at them) [logic + ui] — logic done; UI still draws a 10×10 grid
+- [ ] Russian mode ("Морской бой"): 1×4, 2×3, 3×2, 4×1 ships, no touching, hit = shoot again (check other games for variants) [logic + ui] — logic done, playable now (4th mode button)
+
+## UI / UX
+- [ ] Torpedo UI cleaner [ui]
+- [ ] Toggles look better [ui]
+- [ ] Much clearer when it's your turn [ui]
+- [ ] Mobile battle fits one screen; scrolling only for extra details; minimap of your own fleet [ui]
+- [ ] Review every screen: clearer, simpler layout and selection; keep the design language [design → ui]
+
+## Logic API for UI
+
+Protocol is now version 3 (CONFIG is 7 bytes, ships are 2 bytes). Full rules are in PLAN.md §5–7.1.
+
+**Config** (`game/types.ts`): `{ mode: 0 classic | 1 salvo | 2 items | 3 russian, extraShot, noTouch, timer, size: 0 small 8×8 | 1 classic 10×10 | 2 large 12×12 | 3 huge 14×14, seed }`.
+- Use `ctrl.setConfig({ size })`, `ctrl.setConfig({ mode: 3 })`, and so on. The controller normalises through `normConfig`: Russian forces `size 1`, `noTouch` and `extraShot`; Salvo forces `extraShot` off. Extra shot is valid in Classic and Items.
+- The host rolls `seed` itself for every game. The UI never sets it.
+- `rules`: `MODE_NAMES` (now includes 'Russian'), `SIZES` = [8, 10, 12, 14], `SIZE_NAMES` = ['Small', 'Classic', 'Large', 'Huge'], `rulesLine(config)` (now names the size, e.g. "Large 12×12").
+
+**Geometry** (`Geo`, from `geoOf(config)`; memoised, so it is safe to call every render):
+- `n` is the side length. A cell is `row * n + col`.
+- `fleet` holds the ship lengths in fleet order, and `names` the ship names. Russian has duplicate names ("Cruiser" ×2, …).
+- `islands: Set<Cell>`, `total` (ship cells), `noTouch`.
+- During placement use `ctrl.geo`, which comes from the current config. During a battle or at the end use `match.geo`, which holds that game's rules.
+- `match.target.shot` and `match.own.shot` include the islands from the start, so check `geo.islands.has(c)` first to draw them as land.
+- `match.target.known` now also includes the diagonal neighbours of hits when ships can't touch.
+
+**Changed signatures** (every function now takes the geo first):
+- `shipCells(g, ship, i)`, `occupancy(g, fleet)`, `fleetLegal(g, fleet)`, `canPlace(g, fleet, i, ship)`, `neighbours8(c, n)`, `row(c, n)`, `randomFleet(g, rng)`.
+- `itemParamsValid(g, item, a, b)`, `footprint(g, item, a, b)`, `torpedoLine(g, a, b)`, `clampSonar(g, cell)`, `clampLine(g, cell, vertical)`.
+- `cellName(c, n = 10)`, `parseCell(s, n = 10)`, `untargeted(match, board = match.target)`.
+- UI helpers I changed minimally to compile: `grid.capsule(ship, len, cls)`, `grid.sunk(ship, len, anim)`, `grid.cellsOf(g, ship, i)`, `battle.model(g, board, opts)`.
+- `grid.ts` itself (cells, keyboard nav, `cellAt`, SVG viewBox) is still hard-coded to 10×10. That is enough for Classic, Salvo, Items and Russian, but Small, Large and Huge need it to use `g.n`.
+
+**Airstrike** (`items.AIRSTRIKE = 4`, cost 4, "Hits 5 cells on a diagonal"):
+- `a` is the centre cell, with row and column in 2..n-3. `b` is 0 for `\` and 1 for `/`.
+- `clampAirstrike(g, cell)` gives a valid centre. `battle.ts` already builds it: R rotates it, and the direction labels are "falling" and "rising".
+- `ITEMS` now has 5 entries, and the ids equal the indexes.
+- Area items (Cross, Line, Airstrike) may be aimed at already-hit cells. They are legal unless every footprint cell is already resolved.
+
+**Extra shot in Items mode:** any hit by a shot, a torpedo or an area item gives another turn. Sonar never does. An extra turn adds no energy.
+
+**Prefire** (purely local, `Controller`):
+- `ctrl.queue: number[]` holds the queued cells.
+- `ctrl.prefire(cell)` toggles a cell. It only works in phase `'theirTurn'`, and ignores cells that are already shot or are islands. Salvo queues up to `shotsAllowed(m, 'me')` cells. Other modes queue one normal shot, and a new pick replaces the old one.
+- `ctrl.clearPrefire()` empties the queue.
+- When my turn starts, the queue drops cells that were fired at and shots I no longer have. It fires if it is complete. Otherwise, in Salvo, the cells become `ctrl.sel`.
+- The queue is cleared on placement and at game end.
+- UI to do: on their turn, route target-board taps to `ctrl.prefire`, show the queued cells, and offer a clear button.

@@ -2,7 +2,8 @@ import { decodeFleet, decodeShip, encodeFleet, encodeShip } from '../game/board'
 import { decodeConfig, encodeConfig } from '../game/rules';
 import type { Config, Entry, Fleet, ItemId } from '../game/types';
 
-export const PROTO_VERSION = 2;
+/** 3: board sizes, islands, Russian mode, Airstrike; 2-byte ships; config carries size + seed. */
+export const PROTO_VERSION = 3;
 
 export type Msg =
   | { t: 'hello'; ver: number; role: 0 | 1 }
@@ -30,7 +31,7 @@ export function encode(m: Msg): Uint8Array {
     : m.t === 'ready' ? [m.board, m.coin]
     : m.t === 'coin' ? [m.nonce]
     : m.t === 'fire' ? [m.cells]
-    : m.t === 'answer' ? m.entries.map((e) => (e.code > 1 ? [e.cell, e.code, encodeShip(e.ship!)] : [e.cell, e.code]))
+    : m.t === 'answer' ? m.entries.map((e) => (e.code > 1 ? [e.cell, e.code, ...encodeShip(e.ship!)] : [e.cell, e.code]))
     : m.t === 'use' ? [[m.item, m.a, m.b]]
     : m.t === 'sonar' ? [[m.count]]
     : m.t === 'reveal' ? [m.salt, encodeFleet(m.fleet)]
@@ -43,7 +44,7 @@ export function encode(m: Msg): Uint8Array {
 export function decode(u: Uint8Array): Msg | null {
   const n = u.length;
   const [op, a = 0, b = 0, c = 0] = u;
-  const config = n === 4 ? decodeConfig(a, b, c) : null;
+  const config = decodeConfig(u.subarray(1));
   switch (op) {
     case OP.hello:
       return n === 3 && b < 2 ? { t: 'hello', ver: a, role: b as 0 | 1 } : null;
@@ -55,25 +56,25 @@ export function decode(u: Uint8Array): Msg | null {
       return n === 17 ? { t: 'coin', nonce: u.slice(1) } : null;
     case OP.fire: {
       const cells = [...u.subarray(1)];
-      return n > 1 && n < 7 && cells.every((x) => x < 100) ? { t: 'fire', cells } : null;
+      return n > 1 && n < 12 && cells.every((x) => x < 196) ? { t: 'fire', cells } : null;
     }
     case OP.answer: {
       const entries: Entry[] = [];
       for (let i = 1; i < n; ) {
         const cell = u[i++]!;
         const code = u[i++] ?? 9;
-        const ship = code > 1 ? decodeShip(u[i++] ?? 255) : null;
-        if (cell > 99 || code > 6 || i > n || (code > 1 && !ship)) return null;
+        const ship = code > 1 ? decodeShip(u[i++] ?? 0, u[i++] ?? 9) : null;
+        if (cell > 195 || code > 11 || i > n || (code > 1 && !ship)) return null;
         entries.push(ship ? { cell, code, ship } : { cell, code });
       }
       return { t: 'answer', entries };
     }
     case OP.use:
-      return n === 4 && a < 4 ? { t: 'use', item: a as ItemId, a: b, b: c } : null;
+      return n === 4 && a < 5 ? { t: 'use', item: a as ItemId, a: b, b: c } : null;
     case OP.sonar:
       return n === 2 && a < 10 ? { t: 'sonar', count: a } : null;
     case OP.reveal: {
-      const fleet = n === 22 && decodeFleet(u.subarray(17));
+      const fleet = n > 17 && decodeFleet(u.subarray(17));
       return fleet ? { t: 'reveal', salt: u.slice(1, 17), fleet } : null;
     }
     case OP.verdict:

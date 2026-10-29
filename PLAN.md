@@ -18,7 +18,7 @@ Everything below has been decided. Where research offered alternatives, this pla
 | Anti-cheat | Commit-reveal: SHA-256 over (tag, salt, board) via `crypto.subtle` | Adds 0 bundle bytes |
 | Who starts | Commit-reveal coin flip in game 1. The players then alternate in rematches. | Fair, and matches the anti-cheat theme |
 | Modes | Classic (default), Salvo, Items. Toggles: Extra shot after hit (Classic only, default off), Ships can't touch (default off), Turn timer Off/15/30/60 s (default Off). | Research |
-| Items | Sonar (2), Torpedo (3), Cross bomb (4), Line strike (5). Energy +1 per turn, cap 6. | Small and balanced; see §7 |
+| Items | Sonar (2), Torpedo (3), Cross bomb (4), Airstrike (4), Line strike (5). Energy +1 per turn, cap 6. | Small and balanced; see §7 |
 | Theme | Nautical-chart look: paper and ink, one signal orange. Light and dark follow `prefers-color-scheme`, with no theme toggle. | Spec, and the anti-AI-look rules |
 | Routing | Hash only: `#4821`, `#o=<blob>`, `#a=<blob>` | Works on GitHub Pages without a 404 trick |
 
@@ -202,28 +202,28 @@ The notice reads "Couldn't connect — your network may be blocking peer-to-peer
 
 ## 5. Wire protocol (binary, over DataChannel `g`/512)
 
-Each frame is one message. Byte 0 is the opcode. The channel is reliable and ordered (the default). Cell = `row*10 + col` (0..99). Frames over 64 bytes are rejected. If a message fails to decode or arrives in the wrong state, the receiver goes to `end(cheat, 'invalid message')` during battle and ignores it at other times.
+Each frame is one message. Byte 0 is the opcode. The channel is reliable and ordered (the default). Cell = `row*n + col` (n = 8, 10, 12 or 14; see §7.1). Frames over 64 bytes are rejected. If a message fails to decode or arrives in the wrong state, the receiver goes to `end(cheat, 'invalid message')` during battle and ignores it at other times.
 
 | Op | Name | Layout | Bytes | Sender |
 |---|---|---|---|---|
-| 0x01 | HELLO | `01 ver=2 role(0 host,1 guest)` | 3 | both, on channel open |
-| 0x02 | CONFIG | `02 mode(0 classic,1 salvo,2 items) flags(b0 extraShot, b1 noTouch) timerSec(0/15/30/60)` | 4 | host, after HELLO and in REMATCH |
+| 0x01 | HELLO | `01 ver=3 role(0 host,1 guest)` | 3 | both, on channel open |
+| 0x02 | CONFIG | `02 mode(0 classic,1 salvo,2 items,3 russian) flags(b0 extraShot, b1 noTouch) timerSec(0/15/30/60) size(0..3) seedHi seedLo` | 7 | host, after HELLO and in REMATCH |
 | 0x03 | READY | `03 boardCommit[32] coinCommit[32]` | 65 | both, on Ready |
 | 0x04 | COIN | `04 nonce[16]` | 17 | both, after having sent READY **and** received the peer's READY (game 1 only) |
-| 0x10 | FIRE | `10 c1 … cn` (n = 1 in Classic/Items, 1..5 in Salvo) | 2–6 | attacker |
-| 0x11 | ANSWER | `11` then entries `cell code` with code 0 miss, 1 hit, 2+i sunk ship i; a sunk entry is followed by one byte `anchor | vertical<<7` | 1 + 2/entry (+1 if sunk) | defender |
+| 0x10 | FIRE | `10 c1 … cn` (n = 1, or in Salvo up to the fleet size, 8 at most) | 2–11 | attacker |
+| 0x11 | ANSWER | `11` then entries `cell code` with code 0 miss, 1 hit, 2+i sunk ship i; a sunk entry is followed by two bytes `anchor vertical` | 1 + 2/entry (+2 if sunk) | defender |
 | 0x12 | USE | `12 item a b` (see §7) | 4 | attacker, Items mode |
 | 0x13 | SONAR | `13 count(0..9)` | 2 | defender |
-| 0x20 | REVEAL | `20 salt[16] fleet[5]` | 22 | both, at game over |
+| 0x20 | REVEAL | `20 salt[16] fleet[2 per ship]` | 25–37 | both, at game over |
 | 0x21 | VERDICT | `21 ok(0/1)` | 2 | both, after verifying |
-| 0x30 | REMATCH | guest: `30`. host: `30 mode flags timerSec` | 1 / 4 | both |
+| 0x30 | REMATCH | guest: `30`. host: `30` + the 6 CONFIG bytes (a new island seed) | 1 / 7 | both |
 | 0x31 | BYE | `31` | 1 | on Leave |
 | 0x32 | PING | `32` | 1 | a page back from 10 s+ in the background |
 | 0x33 | PONG | `33` | 1 | answer to PING, in any state |
 
 Typical sizes: a Classic shot is 2 B and its answer is 3 B (4 B on a sunk). A full Salvo of 5 shots is 6 B, answered with at most 16 B. A Torpedo "clean run" is the 1-byte frame `11` (an empty ANSWER).
 
-**Fleet encoding** (5 bytes): one byte per ship in the fixed order Carrier 5, Battleship 4, Cruiser 3, Submarine 3, Destroyer 2. Each byte is `anchor | vertical<<7`, where the anchor is the top-left cell.
+**Fleet encoding** (2 bytes per ship): `anchor vertical(0/1)` per ship in the fleet order of §7.1, where the anchor is the top-left cell.
 
 **Defender rules for answers:** the ANSWER lists exactly the footprint cells that had not been fired at before, in footprint order (§7). Both sides compute the footprint the same way, so the attacker checks that the answer's cell list matches.
 
@@ -237,8 +237,8 @@ Typical sizes: a Classic shot is 2 B and its answer is 3 B (4 B on a sunk). A fu
 - The cell list matches the footprint.
 - A sunk ship index is not already sunk.
 - A sunk ship's anchor and orientation cover only cells this attacker has now hit, and its length matches.
-- The total number of hit cells never exceeds 17.
-- If all 100 cells have been fired at without 5 sinks, the defender is cheating.
+- The total number of hit cells never exceeds the fleet's ship cells.
+- If every cell has been fired at without sinking the fleet, the defender is cheating.
 
 The full check happens at reveal.
 
@@ -248,8 +248,8 @@ The full check happens at reveal.
 
 - When a player presses Ready:
   - Generate `salt = getRandomValues(16)` and `nonce = getRandomValues(16)`.
-  - Compute `boardCommit = SHA-256("bs1/board" ‖ salt ‖ fleet5 ‖ flags)` and `coinCommit = SHA-256("bs1/coin" ‖ nonce)`.
-  - `flags` is the CONFIG flags byte. It binds the board to the rules in force.
+  - Compute `boardCommit = SHA-256("bs3/board" ‖ salt ‖ config6 ‖ fleet)` and `coinCommit = SHA-256("bs1/coin" ‖ nonce)`.
+  - `config6` is the 6 CONFIG body bytes (mode, flags, timer, size, island seed). It binds the board to the rules, board size and islands in force.
   - Send READY. The local fleet then locks and cannot be changed.
 - **Coin (game 1):** after both READYs, each side sends COIN. The receiver checks `SHA-256("bs1/coin" ‖ nonce) == coinCommit`, and a mismatch means `notice('invalid-move')`. The starter is chosen by `(nonceHost[0] ^ nonceGuest[0]) & 1`: 0 means the host starts. Show the result for 1.2 s ("You go first" / "They go first") as a strip message, then the battle begins.
 - **Rematch:** new salt and new commit. The coin step is skipped, and the player who did not start the previous game starts.
@@ -267,7 +267,7 @@ The full check happens at reveal.
 
 ## 7. Game modes: exact rules
 
-Every mode uses a 10×10 board, the fleet Carrier 5, Battleship 4, Cruiser 3, Submarine 3, Destroyer 2 (17 cells), and straight ships, horizontal or vertical.
+Ships are straight, horizontal or vertical. Board size and fleet follow §7.1; Classic 10×10 is Carrier 5, Battleship 4, Cruiser 3, Submarine 3, Destroyer 2 (17 cells).
 
 **Placement.** The board starts **pre-filled with a random legal fleet**, so a player can just press Ready.
 - Randomize re-rolls the fleet.
@@ -277,7 +277,7 @@ Every mode uses a 10×10 board, the fleet Carrier 5, Battleship 4, Cruiser 3, Su
 
 **Classic.**
 - One shot per turn.
-- With **Extra shot after a hit** on (Classic only, default off), a hit or sunk gives the same player another shot. The turn timer then restarts.
+- With **Extra shot after a hit** on (Classic and Items, default off), a hit or sunk gives the same player another turn. The turn timer then restarts.
 - A miss passes the turn.
 
 **Salvo.**
@@ -286,9 +286,9 @@ Every mode uses a 10×10 board, the fleet Carrier 5, Battleship 4, Cruiser 3, Su
 - All the shots resolve in one ANSWER, and the turn always passes. Extra shot is disabled in this mode.
 
 **Items.**
-- Shots are as in Classic, with Extra shot disabled.
+- Shots are as in Classic. With Extra shot on, any hit (a shot, a torpedo or an area item; never sonar) gives another turn, which does not add energy.
 - Energy: at the **start of each of your turns** you gain +1, capped at 6. You start a game at 0, so your first turn has 1. Both sides track both energies deterministically.
-- On your turn you either **fire one shot** or **use one item**. An item replaces the shot and costs energy. After that the turn always passes.
+- On your turn you either **fire one shot** or **use one item**. An item replaces the shot and costs energy. After that the turn passes (unless Extra shot applies).
 - Each item names its footprint inputs `a` and `b`, and its footprint cells are taken in the order listed:
 
 | Id | Item | Cost | Input (a, b) | Effect | Answer |
@@ -297,9 +297,11 @@ Every mode uses a 10×10 board, the fleet Carrier 5, Battleship 4, Cruiser 3, Su
 | 1 | **Torpedo** | 3 | a = line index 0..9, b = entry edge 0 left, 1 right, 2 top, 3 bottom (0/1 for a row, 2/3 for a column) | Travels from the edge cell by cell. Cells already fired at are passed over. It stops at the first intact ship cell, which it hits. Every cell it crossed is learned as water. | ANSWER with 1 entry, or empty for a clean run (the whole line holds no intact ship) |
 | 2 | **Cross bomb** | 4 | a = centre cell, b = 0 | Centre, N, E, S, W. Arms that fall off the board are dropped. | ANSWER over the untargeted cells |
 | 3 | **Line strike** | 5 | a = start cell (left or top end), b = 0 horizontal / 1 vertical; all 5 cells must be on the board | 5 consecutive cells | ANSWER over the untargeted cells |
+| 4 | **Airstrike** | 4 | a = centre cell, row and col in 2..n-3; b = 0 `\` / 1 `/` | 5 cells on a diagonal, top to bottom | ANSWER over the untargeted cells |
 
 Balance notes for implementers (these are not settings):
-- Cross and Line hit the same number of cells. Line costs more because, once lined up with a ship, it can sink a Carrier in one go.
+- Cross, Airstrike and Line hit the same number of cells. Line costs more because, once lined up with a ship, it can sink a Carrier in one go. The Airstrike touches each ship at most once: the best search, the worst finisher. It costs what the Cross costs.
+- Any area item can be centred on cells already fired at; it strikes only the unrevealed cells.
 - The cap of 6 means a player can never bank two big items.
 - If every cell of an area item's footprint has already been fired at, the UI disables the item at that target, and the defender's check rejects it.
 - Learned water from a torpedo and the cells of a sonar result reading 0 are drawn as "known water".
@@ -309,11 +311,28 @@ Balance notes for implementers (these are not settings):
 - A thin bar depletes under the status strip, and it turns signal colour in the last 5 s.
 - On the opponent's turn the bar shows their time. If nothing arrives for timer + 15 s, show "Opponent isn't responding" with a Leave button. Leaving counts as a forfeit win, unverified.
 
-**Auto-marked water.** Only with no-touch on: when a ship sinks, its 8-neighbourhood is drawn as known water on the attacker's board.
+**Auto-marked water.** Only with no-touch on: when a ship sinks, its 8-neighbourhood is drawn as known water on the attacker's board, and so are the diagonal neighbours of every hit.
 
-**Win.** A player wins by sinking all 5 enemy ships. There are no draws, because play is sequential.
+**Russian («Морской бой»).** The common rules of the paper game and the popular online versions: 10×10, fleet 1×4, 2×3, 3×2, 4×1 (20 cells), ships can't touch (diagonals included), a hit or sunk shoots again, water around sunk ships is auto-marked. No items, no other sizes (the config is normalised to this).
+
+**Prefire** (local only, no wire change). During the opponent's turn a player can queue their next shot (Salvo: up to their shot count; Classic, Items, Russian: one normal shot). It fires as their turn starts. Cells fired at meanwhile are dropped, and a Salvo queue is cut to the shots they still have; a Salvo queue that is short becomes the selection.
+
+**Win.** A player wins by sinking the whole enemy fleet. There are no draws, because play is sequential.
 
 **Stats on the end screen:** shots fired (cells), hits, accuracy %, ships lost, turns, and items used (Items mode only).
+
+
+### 7.1 Board sizes and islands
+
+| Size | Board | Fleet | Islands |
+|---|---|---|---|
+| Small | 8×8 | Battleship 4, Cruiser 3, Submarine 3, Destroyer 2 (12) | none |
+| Classic | 10×10 | Carrier 5, Battleship 4, Cruiser 3, Submarine 3, Destroyer 2 (17) | none |
+| Large | 12×12 | Carrier 5, Battleship 4, Cruiser 3, Submarine 3, Frigate 3, Destroyer 2, Patrol boat 2 (22) | 3 |
+| Huge | 14×14 | Carrier 5, Battleship 4, Battlecruiser 4, Cruiser 3, Submarine 3, Frigate 3, Destroyer 2, Patrol boat 2 (26) | 5 |
+
+- Islands are blobs of 2–4 cells, off the edge rows and columns, at least two cells of water apart. Both sides derive them from the 16-bit seed in CONFIG (`rules.makeIslands`, mulberry32). The host rolls a new seed for every game.
+- No ship may cover an island (placement, random placement and the reveal check all enforce it). Islands can't be fired at, they start as resolved cells on both boards, torpedoes stop short of the first island in their path, and area items skip island cells. A sonar still covers its full 3×3; islands hold no ships.
 
 ---
 

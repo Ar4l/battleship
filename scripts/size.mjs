@@ -4,11 +4,12 @@ import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 
 const KB = 1000;
-// Budgets (gzip -9). The hard one is `session`: the product aim is "well under 40 KB"
-// for everything a code game downloads (html + entry + Trystero); PLAN.md §12 has the
-// breakdown. The per-file numbers are guard rails with a little slack, so a small CSS
+// Budgets (gzip -9). The hard one is `session`: everything a code game downloads
+// (html + entry + Trystero). It was "well under 40 KB"; board sizes, islands, Russian
+// mode, Airstrike and prefire raised it, and the ceiling is now 44 KB. PLAN.md §12 has
+// the breakdown. The per-file numbers are guard rails with a little slack, so a small CSS
 // change doesn't fail a deploy while the total still fits.
-const BUDGET = { html: 5.2 * KB, entry: 19.9 * KB, trystero: 15.4 * KB, direct: 4.5 * KB, session: 40 * KB };
+const BUDGET = { html: 5.2 * KB, entry: 21.5 * KB, trystero: 15.4 * KB, direct: 4.5 * KB, session: 41.6 * KB };
 
 const files = [];
 const walk = (d) => readdirSync(d).forEach((f) => (statSync(join(d, f)).isDirectory() ? walk(join(d, f)) : files.push(join(d, f))));

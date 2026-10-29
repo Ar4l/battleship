@@ -1,7 +1,7 @@
 import type { Controller } from '../../app/controller';
 import { cellName } from '../../game/board';
-import { FLEET, SHIP_NAMES, canPlace, rulesLine } from '../../game/rules';
-import type { Ship } from '../../game/types';
+import { canPlace, rulesLine } from '../../game/rules';
+import type { Geo, Ship } from '../../game/types';
 import { announce } from '../announce';
 import { board, capsule, cellsOf } from '../grid';
 import { h } from '../h';
@@ -10,12 +10,13 @@ import { btn, label, type Screen } from '../kit';
 type Ghost = { i: number; ship: Ship };
 
 /** Move ship i's anchor by (dr, dc) and/or flip it, keeping it on the board. */
-function shift(i: number, ship: Ship, dr = 0, dc = 0, flip = false): Ship {
-  const len = FLEET[i]!;
+function shift(g: Geo, i: number, ship: Ship, dr = 0, dc = 0, flip = false): Ship {
+  const len = g.fleet[i]!;
+  const n = g.n;
   const v = ship.vertical !== flip;
-  const r = Math.max(0, Math.min(v ? 10 - len : 9, (ship.anchor - (ship.anchor % 10)) / 10 + dr));
-  const c = Math.max(0, Math.min(v ? 9 : 10 - len, (ship.anchor % 10) + dc));
-  return { anchor: r * 10 + c, vertical: v };
+  const r = Math.max(0, Math.min(v ? n - len : n - 1, (ship.anchor - (ship.anchor % n)) / n + dr));
+  const c = Math.max(0, Math.min(v ? n - 1 : n - len, (ship.anchor % n) + dc));
+  return { anchor: r * n + c, vertical: v };
 }
 const MOVES: Record<string, [number, number]> = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
 
@@ -24,8 +25,10 @@ export function placement(ctrl: Controller): Screen {
   let ghost: Ghost | null = null; // keyboard lift or drag
   let drag: { i: number; offset: number; x: number; y: number; moved: boolean; id: number; t: number } | null = null;
   const locked = () => ctrl.state.s !== 'placement' || ctrl.state.ready.me;
-  const legal = (g: Ghost) => canPlace(ctrl.fleet, g.i, g.ship, ctrl.config.noTouch);
-  const where = (g: Ghost) => `${cellName(g.ship.anchor)} ${g.ship.vertical ? 'vertical' : 'horizontal'}`;
+  const geo = () => ctrl.geo;
+  const SHIP_NAMES = geo().names;
+  const legal = (g: Ghost) => canPlace(geo(), ctrl.fleet, g.i, g.ship);
+  const where = (g: Ghost) => `${cellName(g.ship.anchor, geo().n)} ${g.ship.vertical ? 'vertical' : 'horizontal'}`;
   const snapback = () => {
     b.el.classList.add('snapback');
     setTimeout(() => b.el.classList.remove('snapback'), 160);
@@ -46,20 +49,20 @@ export function placement(ctrl: Controller): Screen {
   };
   const rotate = (i: number) => {
     if (locked()) return;
-    const g = { i, ship: shift(i, ctrl.fleet[i]!, 0, 0, true) };
+    const g = { i, ship: shift(geo(), i, ctrl.fleet[i]!, 0, 0, true) };
     place(g, `${SHIP_NAMES[i]} ${where(g)}.`, "Can't rotate here.");
     render();
   };
-  const drop = (g: Ghost) => place(g, `${SHIP_NAMES[g.i]} placed at ${cellName(g.ship.anchor)}.`);
+  const drop = (g: Ghost) => place(g, `${SHIP_NAMES[g.i]} placed at ${cellName(g.ship.anchor, geo().n)}.`);
 
   const b = board('Your fleet', false, {
     onPointerDown: (cell, e) => {
-      const i = ctrl.fleet.findIndex((s, k) => cellsOf(s, k).includes(cell));
+      const i = ctrl.fleet.findIndex((s, k) => cellsOf(geo(), s, k).includes(cell));
       if (locked() || i < 0) return;
       e.preventDefault();
       const s = ctrl.fleet[i]!;
       (e.target as Element).setPointerCapture?.(e.pointerId);
-      drag = { i, offset: s.vertical ? (cell - s.anchor) / 10 : cell - s.anchor, x: e.clientX, y: e.clientY, moved: false, id: e.pointerId, t: e.timeStamp };
+      drag = { i, offset: s.vertical ? (cell - s.anchor) / geo().n : cell - s.anchor, x: e.clientX, y: e.clientY, moved: false, id: e.pointerId, t: e.timeStamp };
       sel = i;
       render();
     },
@@ -72,9 +75,10 @@ export function placement(ctrl: Controller): Screen {
     const cell = b.cellAt(e.clientX, e.clientY);
     if (cell < 0) return;
     const v = ctrl.fleet[drag.i]!.vertical;
-    const r = Math.max(0, (cell - (cell % 10)) / 10 - (v ? drag.offset : 0));
-    const c = Math.max(0, (cell % 10) - (v ? 0 : drag.offset));
-    ghost = { i: drag.i, ship: shift(drag.i, { anchor: r * 10 + c, vertical: v }) };
+    const n = geo().n;
+    const r = Math.max(0, (cell - (cell % n)) / n - (v ? drag.offset : 0));
+    const c = Math.max(0, (cell % n) - (v ? 0 : drag.offset));
+    ghost = { i: drag.i, ship: shift(geo(), drag.i, { anchor: r * n + c, vertical: v }) };
     render();
   });
   on('pointerup', (e) => {
@@ -119,7 +123,7 @@ export function placement(ctrl: Controller): Screen {
             if (!r) return;
             rotate(i);
           } else if (MOVES[k] || r) {
-            ghost = { i, ship: shift(i, ghost.ship, ...(MOVES[k] ?? [0, 0]), r) };
+            ghost = { i, ship: shift(geo(), i, ghost.ship, ...(MOVES[k] ?? [0, 0]), r) };
             announce(where(ghost) + (legal(ghost) ? '.' : ', blocked.'));
           } else if (k === 'Escape') {
             ghost = null;
@@ -129,9 +133,9 @@ export function placement(ctrl: Controller): Screen {
           render();
         },
       },
-      h('span', { cls: 'cap-ship', style: `--len:${FLEET[i]}` }),
+      h('span', { cls: 'cap-ship', style: `--len:${geo().fleet[i]}` }),
       h('span', null, name),
-      h('span', 'mono muted small', FLEET[i]),
+      h('span', 'mono muted small', geo().fleet[i]),
     ),
   );
 
@@ -165,12 +169,12 @@ export function placement(ctrl: Controller): Screen {
     const occ: number[] = [];
     let ov = '';
     ctrl.fleet.forEach((sh, i) => {
-      cellsOf(sh, i).forEach((c) => (occ[c] = i));
-      ov += capsule(sh, i, 'own' + (ghost?.i === i ? ' lifted' : '') + (i === sel && !me ? ' selected' : ''));
+      cellsOf(geo(), sh, i).forEach((c) => (occ[c] = i));
+      ov += capsule(sh, geo().fleet[i]!, 'own' + (ghost?.i === i ? ' lifted' : '') + (i === sel && !me ? ' selected' : ''));
     });
-    if (ghost) ov += capsule(ghost.ship, ghost.i, 'ghost' + (legal(ghost) ? '' : ' bad'));
+    if (ghost) ov += capsule(ghost.ship, geo().fleet[ghost.i]!, 'ghost' + (legal(ghost) ? '' : ' bad'));
     // Ship cells take the drag; water lets the page scroll and zoom (occ is sparse: water stays empty).
-    b.update({ cls: occ.map(() => (me ? '' : 'ship')), labels: Array.from({ length: 100 }, (_, c) => cellName(c) + (occ[c] === undefined ? '' : ', ' + SHIP_NAMES[occ[c]!])), overlay: ov });
+    b.update({ cls: occ.map(() => (me ? '' : 'ship')), labels: Array.from({ length: geo().n ** 2 }, (_, c) => cellName(c, geo().n) + (occ[c] === undefined ? '' : ', ' + SHIP_NAMES[occ[c]!])), overlay: ov });
     dockBtns.forEach((d, i) => {
       d.setAttribute('aria-pressed', String(i === sel));
       d.classList.toggle('lifted', ghost?.i === i);

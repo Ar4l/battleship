@@ -3,7 +3,7 @@ import { expect, type Browser, type BrowserContextOptions, type BrowserServer, t
 
 export type Fleet = { anchor: number; vertical: boolean }[];
 const LENS = [5, 4, 3, 3, 2];
-export const fleetCells = (f: Fleet): number[] => f.flatMap((s, i) => Array.from({ length: LENS[i]! }, (_, k) => s.anchor + (s.vertical ? k * 10 : k)));
+export const fleetCells = (f: Fleet, lens: readonly number[] = LENS): number[] => f.flatMap((s, i) => Array.from({ length: lens[i]! }, (_, k) => s.anchor + (s.vertical ? k * 10 : k)));
 
 export async function player(browser: Browser, opts: BrowserContextOptions = {}): Promise<Page> {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, ...opts });
@@ -43,7 +43,7 @@ export const stateKind = async (page: Page): Promise<string> => {
 };
 
 /** Host config is chosen in the lobby. */
-export async function hostLobby(A: Page, mode: 'Classic' | 'Salvo' | 'Items' = 'Classic', extra: string[] = []): Promise<void> {
+export async function hostLobby(A: Page, mode: 'Classic' | 'Salvo' | 'Items' | 'Russian' = 'Classic', extra: string[] = []): Promise<void> {
   await A.goto('./');
   await A.click('#create');
   await expect(A.locator('#room-code')).toHaveText(/^\d{4}$/);
@@ -52,7 +52,7 @@ export async function hostLobby(A: Page, mode: 'Classic' | 'Salvo' | 'Items' = '
 }
 
 /** Connect A (host) and B (guest) through the two-link direct fallback. */
-export async function connectDirect(A: Page, B: Page, mode: 'Classic' | 'Salvo' | 'Items' = 'Classic', extra: string[] = [], gapMs = 0): Promise<void> {
+export async function connectDirect(A: Page, B: Page, mode: 'Classic' | 'Salvo' | 'Items' | 'Russian' = 'Classic', extra: string[] = [], gapMs = 0): Promise<void> {
   await hostLobby(A, mode, extra);
   await A.click('#use-direct');
   const offer = (await A.locator('#offer-link').textContent())!;
@@ -93,9 +93,10 @@ export const targetCell = (p: Page, i: number) => p.locator(`.a-target .cell[dat
 
 /** Play until the end: `winner` fires at the loser's ships, the loser fires at water. `tap`: touch taps, not clicks. */
 export async function playOut(A: Page, B: Page, winner: Page, mode: 'classic' | 'salvo' = 'classic', tap = false): Promise<void> {
+  const lens: number[] = await A.evaluate(() => (window as unknown as { __bs: { ctrl: { geo: { fleet: number[] } } } }).__bs.ctrl.geo.fleet);
   const fleets = new Map<Page, number[]>([
-    [A, fleetCells(await bs<Fleet>(A, 'myFleet'))],
-    [B, fleetCells(await bs<Fleet>(B, 'myFleet'))],
+    [A, fleetCells(await bs<Fleet>(A, 'myFleet'), lens)],
+    [B, fleetCells(await bs<Fleet>(B, 'myFleet'), lens)],
   ]);
   for (let guard = 0; guard < 200; guard++) {
     const p = await waitTurn(A, B);

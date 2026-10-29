@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { applyAnswer, createMatch, legalAttack, localAttack, remoteAttack, shotsAllowed, type Match } from '../../src/game/engine';
+import { applyAnswer, createMatch, legalAttack, localAttack, remoteAttack, shotsAllowed, untargeted, type Match } from '../../src/game/engine';
+import { randomFleet } from '../../src/game/random';
+import { fleetLegal, geoOf } from '../../src/game/rules';
+import { seededRng } from '../../src/game/seeded';
 import { resolveAttack } from '../../src/game/resolve';
 import type { Attack, Config, Fleet } from '../../src/game/types';
-import { FLEET_A, FLEET_B } from './helpers';
-
-const cfg = (c: Partial<Config> = {}): Config => ({ mode: 0, extraShot: false, noTouch: false, timer: 0, ...c });
+import { FLEET_A, FLEET_B, G, cfgOf as cfg } from './helpers';
 
 /** Two engines in lockstep: A (fleet a) starts. */
 function pair(c: Config, a: Fleet = FLEET_A, b: Fleet = FLEET_B) {
@@ -159,7 +160,7 @@ describe('engine: live answer checks', () => {
     expect(applyAnswer(A, { k: 'cells', entries: [{ cell: 8, code: 0 }] })).toEqual({ cheat: 'they answered for the wrong cells' });
     expect(applyAnswer(A, { k: 'cells', entries: [{ cell: 9, code: 6, ship: { anchor: 9, vertical: true } }] })).toMatchObject({ cheat: /sunk ship/ });
     expect(applyAnswer(A, { k: 'sonar', count: 1 })).toMatchObject({ cheat: /wrong kind/ });
-    expect(applyAnswer(A, resolveAttack(FLEET_B, new Set(), fire(9)))).toEqual({ ok: true });
+    expect(applyAnswer(A, resolveAttack(G, FLEET_B, new Set(), fire(9)))).toEqual({ ok: true });
   });
   it('flags a defender that never reports all ships sunk', () => {
     const { A } = pair(cfg({ extraShot: true }));
@@ -170,5 +171,103 @@ describe('engine: live answer checks', () => {
       if (c < 99) expect(r).toEqual({ ok: true });
       else expect(r).toMatchObject({ cheat: /every cell/ });
     }
+  });
+});
+
+describe('engine: area items on revealed cells', () => {
+  it('a cross bomb centred on an already-hit cell strikes only the unrevealed arms', () => {
+    const { A, B, play } = pair(cfg({ mode: 2 }));
+    play(A, B, fire(17)); // FLEET_B battleship, column 7
+    play(B, A, fire(99));
+    A.energy.me = B.energy.them = 6;
+    const x = play(A, B, { k: 'item', item: 2, a: 17, b: 0 });
+    expect(x.k === 'cells' && x.entries.map((e) => e.cell)).toEqual([7, 18, 27, 16]);
+    expect(A.target.hit.has(7) && A.target.hit.has(27)).toBe(true);
+  });
+  it('airstrike resolves through the engine and costs 4', () => {
+    const { A, B, play } = pair(cfg({ mode: 2 }));
+    A.energy.me = B.energy.them = 4;
+    const x = play(A, B, { k: 'item', item: 4, a: 33, b: 1 }); // 15 24 33 42 51
+    expect(x.k === 'cells' && x.entries.map((e) => [e.cell, e.code])).toEqual([[15, 1], [24, 0], [33, 0], [42, 0], [51, 0]]);
+    expect(A.energy.me).toBe(0);
+  });
+});
+
+describe('engine: extra shot in Items mode', () => {
+  it('a hit by a shot or an item keeps the turn without new energy; sonar and misses pass', () => {
+    const { A, B, play } = pair(cfg({ mode: 2, extraShot: true }));
+    expect(A.config.extraShot).toBe(true);
+    play(A, B, fire(9)); // hit
+    expect(A.phase).toBe('myTurn');
+    expect(A.energy.me).toBe(1);
+    A.energy.me = 6;
+    B.energy.them = 6;
+    play(A, B, { k: 'item', item: 1, a: 7, b: 2 }); // torpedo down column 7: hits 7
+    expect(A.phase).toBe('myTurn');
+    play(A, B, { k: 'item', item: 0, a: 55, b: 0 }); // sonar never grants another turn
+    expect(A.phase).toBe('theirTurn');
+    play(B, A, fire(99));
+    A.energy.me = 6;
+    B.energy.them = 6;
+    play(A, B, { k: 'item', item: 2, a: 66, b: 0 }); // all water
+    expect(A.phase).toBe('theirTurn');
+    expect(B.phase).toBe('myTurn');
+  });
+  it('Salvo never has it', () => expect(createMatch(cfg({ mode: 1, extraShot: true }), FLEET_A, true).config.extraShot).toBe(false));
+});
+
+describe('engine: Russian', () => {
+  // 1×4, 2×3, 3×2, 4×1 on rows 0, 2, 4, ... with gaps (no touching).
+  const RU: Fleet = [0, 5, 20, 24, 28, 40, 43, 60, 62, 64].map((anchor) => ({ anchor, vertical: false }));
+  it('hit shoots again; sunk ships and hit diagonals are marked as water', () => {
+    const { A, B, play } = pair(cfg({ mode: 3 }), RU, RU);
+    expect([A.geo.fleet.length, A.geo.total, A.config.noTouch, A.config.extraShot]).toEqual([10, 20, true, true]);
+    play(A, B, fire(60)); // 1-cell boat at A7: sunk
+    expect(A.phase).toBe('myTurn');
+    expect([...A.target.known].sort((a, b) => a - b)).toEqual([50, 51, 61, 70, 71]);
+    play(A, B, fire(1)); // battleship B1: hit, diagonals A2 and C2 known
+    expect(A.phase).toBe('myTurn');
+    expect(A.target.known.has(10) && A.target.known.has(12)).toBe(true);
+    expect(A.target.known.has(0)).toBe(false);
+    play(A, B, fire(99)); // miss passes
+    expect(A.phase).toBe('theirTurn');
+  });
+  it('the whole fleet must be sunk to win', () => {
+    const { A, B, play } = pair(cfg({ mode: 3 }), RU, RU);
+    const cells = RU.flatMap((s, i) => Array.from({ length: A.geo.fleet[i]! }, (_, k) => s.anchor + k));
+    for (const c of cells) play(A, B, fire(c));
+    expect(A.winner).toBe('me');
+    expect(A.stats.me.turns).toBe(1);
+  });
+});
+
+describe('engine: Large board with islands', () => {
+  const c = cfg({ size: 2, seed: 4 }); // islands 13 25 | 56 57 | 106 118 130
+  const L = geoOf(c);
+  const LF: Fleet = [0, 26, 60, 84, 96, 120, 132].map((anchor) => ({ anchor, vertical: false }));
+  it('islands start as resolved, cannot be fired at, and torpedoes stop there', () => {
+    expect(fleetLegal(L, LF)).toBe(true);
+    const { A, B, play } = pair(c, LF, LF);
+    expect(untargeted(A)).toHaveLength(144 - 7);
+    expect(legalAttack(A, fire(13), 'me')).toBe('fired at an island');
+    expect(legalAttack(A, fire(144), 'me')).toBe('shot off the board');
+    expect(remoteAttack(B, fire(56))).toEqual({ cheat: 'they fired at an island' });
+    play(A, B, fire(143));
+    expect(A.target.shot.has(143)).toBe(true);
+  });
+  it('Items: a torpedo from the right along row 4 stops at the island; a cross on an island hits the rest', () => {
+    const { A, B, play } = pair(cfg({ mode: 2, size: 2, seed: 4 }), LF, LF);
+    A.energy.me = 6;
+    B.energy.them = 6;
+    expect(play(A, B, { k: 'item', item: 1, a: 4, b: 1 })).toEqual({ k: 'cells', entries: [] });
+    expect([...A.target.known].filter((x) => x > 47 && x < 60).sort()).toEqual([58, 59]);
+    play(B, A, fire(143));
+    A.energy.me = B.energy.them = 6;
+    const x = play(A, B, { k: 'item', item: 2, a: 13, b: 0 });
+    expect(x.k === 'cells' && x.entries.map((e) => [e.cell, e.code])).toEqual([[1, 1], [14, 0], [12, 0]]);
+  });
+  it('Salvo shots follow the bigger fleet', () => {
+    const { A } = pair(cfg({ mode: 1, size: 3 }), randomFleet(geoOf(cfg({ size: 3 })), seededRng(1)), randomFleet(geoOf(cfg({ size: 3 })), seededRng(2)));
+    expect(shotsAllowed(A, 'me')).toBe(8);
   });
 });
