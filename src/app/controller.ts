@@ -603,14 +603,20 @@ export class Controller {
   private onAnswer(a: Answer): void {
     const s = this.state;
     if (s.s !== 'battle') return;
-    if (s.match.phase !== 'awaitingAnswer') return this.cheat('they answered out of turn');
-    const inv = s.match.inv.me;
+    const m = s.match;
+    if (m.phase !== 'awaitingAnswer') return this.cheat('they answered out of turn');
+    const inv = m.inv.me;
     const held = inv.length;
-    const r = applyAnswer(s.match, a);
+    const pk = m.target.pick;
+    const picks = [...pk];
+    const r = applyAnswer(m, a);
     if ('cheat' in r) return this.cheat(r.cheat);
-    if (s.match.config.turns > 1) return this.settled(s);
-    this.fx = { target: s.match.target.last.slice(), own: [] };
-    const text = (this.timedOut ? "Time's up. " : '') + this.describe(a, true) + (inv.length > held ? ' · Got ' + ITEMS[inv.at(-1)!]!.name : '');
+    if (m.config.turns > 1) return this.settled(s);
+    this.fx = { target: m.target.last.slice(), own: [] };
+    const got = inv.length - held;
+    // Pickups: squares shot with the hold full are lost; say so.
+    const lost = picks.filter(([c]) => !pk.has(c))[got];
+    const text = (this.timedOut ? "Time's up. " : '') + this.describe(a, true) + (got ? ' · Got ' + ITEMS[inv.at(-1)!]!.name : '') + (lost ? ` · Hold full, ${ITEMS[lost[1]]!.name} lost` : '');
     this.timedOut = false;
     this.result(s, text, a);
   }

@@ -97,6 +97,7 @@ test.describe('direct-link fallback (offline-safe)', () => {
     await targetCell(A, free).hover();
     await targetCell(A, free).click();
     await expect(A.locator('.strip-sub')).toContainText('Next: ');
+    await expect(A.locator('.item[aria-pressed="true"]')).toHaveCount(0);
     await targetCell(B, 98).click();
     await expect.poll(() => A.evaluate(() => (window as unknown as W).__bs.state().match.stats.me.items)).toBe(1);
     expect(await A.evaluate(() => (window as unknown as W).__bs.state().match.inv.me.length)).toBe(0);

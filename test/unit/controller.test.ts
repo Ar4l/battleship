@@ -331,6 +331,21 @@ describe('controller over an in-memory transport', () => {
     expect(H.lastResult).toMatch(/^Time's up\. You .* · They /);
   });
 
+  it('pickups: shooting an item square with the hold full says it was lost', async () => {
+    const { H, G } = await connect({ items: true, pickups: true });
+    await placeAndStart(H, G);
+    const me = H.match!.phase === 'myTurn' ? H : G;
+    const m = me.match!;
+    const ships = (me === H ? FLEET_B : FLEET_A).flatMap((s, i) => shipCells(G10, s, i)!);
+    const c = untargeted(m).find((x) => !ships.includes(x) && !m.target.pick.has(x))!;
+    m.inv.me.push(0, 0, 0);
+    m.target.pick.set(c, 1);
+    expect(me.attack({ k: 'fire', cells: [c] })).toBe(true);
+    await until(() => m.phase !== 'awaitingAnswer');
+    expect(me.lastResult).toMatch(/ · Hold full, Torpedo lost$/);
+    expect(m.inv.me).toEqual([0, 0, 0]);
+  });
+
   it('salvo results name the shooter', async () => {
     const { H, G } = await connect({ turns: 1 });
     await placeAndStart(H, G);

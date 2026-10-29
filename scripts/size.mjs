@@ -11,7 +11,7 @@ const KB = 1000;
 // (item pickups, scattered airstrike, item prefire) to 45.5 KB. PLAN.md §12 has
 // the breakdown. The per-file numbers are guard rails with a little slack, so a small CSS
 // change doesn't fail a deploy while the total still fits.
-const BUDGET = { html: 6.0 * KB, entry: 24.5 * KB, trystero: 15.4 * KB, direct: 4.5 * KB, session: 45.5 * KB };
+const BUDGET = { html: 6.0 * KB, entry: 24.6 * KB, trystero: 15.3 * KB, direct: 4.5 * KB, session: 45.5 * KB };
 
 const files = [];
 const walk = (d) => readdirSync(d).forEach((f) => (statSync(join(d, f)).isDirectory() ? walk(join(d, f)) : files.push(join(d, f))));

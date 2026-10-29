@@ -53,7 +53,7 @@ test('prefire: queue on their turn, tap again to remove, the queued shot fires w
   await targetCell(A, 44).click();
   await expect(A.locator('.a-target .cell.queued')).toHaveCount(0);
   await targetCell(A, 45).click();
-  await expect(A.locator('.strip-sub')).toHaveText('Next: F5');
+  await expect(A.locator('.strip-sub')).toHaveText(/(^| · )Next: F5$/);
   await expect(A.locator('#clear-queue')).toBeVisible();
   await expect(A.locator('.battle')).toHaveAttribute('data-turn', 'them');
   await targetCell(B, 98).click();

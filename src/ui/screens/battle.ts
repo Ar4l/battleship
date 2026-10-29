@@ -146,7 +146,7 @@ export function battle(ctrl: Controller): Screen {
     const atk = itemAttack(cell);
     if (atk && (m().phase === 'myTurn' ? ctrl.attack(atk) : (ctrl.prefireItem(atk), announce('Queued ' + ITEMS[item!]!.name), true))) {
       lastAim = cell;
-      item = aim = null;
+      pick(null);
     }
   };
 
@@ -187,10 +187,8 @@ export function battle(ctrl: Controller): Screen {
       const k = e.key;
       if (k === 'Escape') {
         if (item !== null) pick(null);
-        else if (ctrl.queue.length || ctrl.qItem) {
-          ctrl.clearPrefire();
-          announce('Queue cleared');
-        } else ctrl.clearSel();
+        else if (ctrl.queue.length || ctrl.qItem) clear.click();
+        else ctrl.clearSel();
       } else if ((k === 'r' || k === 'R') && item !== null) {
         dir++;
         render();
@@ -379,7 +377,7 @@ export function battle(ctrl: Controller): Screen {
         : tapped && item !== null
           ? `Tap again to ${my ? 'fire' : 'queue'}` + (dn ? ', ' + dn.toLowerCase() : '')
           : theirTurn && qNames
-            ? 'Next: ' + qNames
+            ? (r && r + ' · ') + 'Next: ' + qNames
             : my && r.startsWith('You') && mm.config.turns < 2
                 ? r + '. Shoot again.'
                 : r;
@@ -395,8 +393,9 @@ export function battle(ctrl: Controller): Screen {
     // A sent salvo stays marked until the answer lands.
     const out = mm.pending ?? mm.round.me?.[0];
     const sent = out?.k === 'fire' ? out.cells : ctrl.sel;
-    const tm = model(g, mm.target, { sel: sent, preview, lane: atk?.k === 'item' && atk.item === 1, queue: q, anim: ctrl.fx.target });
-    if (atk?.k === 'item' && atk.item === 1) tm.overlay += torpedo(g, [...preview!], atk.b, preview!.size < n);
+    const lane = atk?.k === 'item' && atk.item === 1;
+    const tm = model(g, mm.target, { sel: sent, preview, lane, queue: q, anim: ctrl.fx.target });
+    if (lane) tm.overlay += torpedo(g, [...preview!], atk.b, preview!.size < n);
     target.update(tm);
     own.update(model(g, mm.own, { own: mm.fleet, anim: ctrl.fx.own }));
     ctrl.fx = { target: [], own: [] };

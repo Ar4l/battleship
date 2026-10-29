@@ -181,7 +181,8 @@ This fixes the TODO item: the media query must not depend on width. Use `(orient
   - Esc clears too.
 - **Turn bar right side during their turn:**
   - Nothing queued: "Tap a square to queue your next shot." Show this only for the first two their-turns of a session, then show the usual last result.
-  - Queued: `Next: E4` (mono) followed by `Clear`. With several queued: `Next: E4, F4 · Clear`.
+  - Queued: `Next: E4` (mono) followed by `Clear`, after the last result if there is one (`You fired at J10: miss · Next: E4`). With several queued: `Next: E4, F4 · Clear`.
+  - Pickups: a collected square adds ` · Got Torpedo` to the result; one shot with the hold full adds ` · Hold full, Torpedo lost`.
 - **How many cells can be queued:**
   - One-shot turns (Classic, Items, Russian): up to 5. One fires each time you get a shot (turn start, and again after a hit when hits shoot again). Leftovers carry over to your next turn. A shot of your own only removes that cell from the queue; using an item clears it.
   - Salvo: up to the current shot count. If one of your ships sinks during their turn, drop the newest cells beyond the new count.
