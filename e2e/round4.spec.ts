@@ -60,7 +60,7 @@ test('prefire: queue on their turn, tap again to remove, the queued shot fires w
   await expect.poll(() => A.evaluate(() => (window as any).__bs.state().match.target.shot.has(45))).toBe(true);
 });
 
-test('lobby: Russian locks both switches and the map; Salvo disables extra shot', async ({ browser }) => {
+test('lobby: Russian locks both switches and the map; Salvo disables extra shot and items', async ({ browser }) => {
   const A = await player(browser);
   await A.goto('./');
   await A.click('#create');
@@ -72,8 +72,16 @@ test('lobby: Russian locks both switches and the map; Salvo disables extra shot'
     await expect(s).toBeDisabled();
   }
   await expect(A.getByRole('radio', { name: '12×12' })).toBeDisabled();
-  await A.getByRole('radio', { name: 'Salvo' }).click();
-  await expect(extra).toBeDisabled();
-  await expect(extra).not.toBeChecked();
+  const items = A.getByRole('switch', { name: 'Items' });
+  await expect(items).toBeEnabled();
+  await A.getByRole('radio', { name: 'Salvo', exact: true }).click();
+  for (const s of [extra, items]) {
+    await expect(s).toBeDisabled();
+    await expect(s).not.toBeChecked();
+  }
+  await expect(A.locator('.settings')).toContainText('One-shot turns only');
+  await expect(touch).toBeDisabled(); // still Russian
+  await A.getByRole('radio', { name: 'Standard' }).click();
   await expect(touch).toBeEnabled();
+  await expect(A.getByRole('radio', { name: '12×12' })).toBeEnabled();
 });

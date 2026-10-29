@@ -169,7 +169,7 @@ export function battle(ctrl: Controller): Screen {
       }
       fireItem(cell);
     } else if (mm.target.shot.has(cell)) return;
-    else if (mm.config.mode === 1) ctrl.toggleSel(cell);
+    else if (mm.config.turns) ctrl.toggleSel(cell);
     else ctrl.attack({ k: 'fire', cells: [cell] });
   };
 
@@ -193,7 +193,7 @@ export function battle(ctrl: Controller): Screen {
       } else if ((k === 'r' || k === 'R') && item !== null) {
         dir++;
         render();
-      } else if (k === 'Enter' && m().config.mode === 1 && item === null && !ctrl.sel.includes(target.focused())) return ctrl.fireSalvo();
+      } else if (k === 'Enter' && m().config.turns && item === null && !ctrl.sel.includes(target.focused())) return ctrl.fireSalvo();
       else return false;
       return true;
     },
@@ -275,17 +275,19 @@ export function battle(ctrl: Controller): Screen {
   let actionsKey = '';
   function renderActions(mm: Match): void {
     const my = mm.phase === 'myTurn';
-    const mode = mm.config.mode;
+    const { turns, items: hasItems } = mm.config;
     const shots = shotsAllowed(mm, 'me');
     const e = mm.energy.me;
     const tip = mm.phase === 'theirTurn' && theirTurns <= 2 && h('p', 'small', TIP);
-    const key = [mm.phase, !!tip, item, dir, armed, tapped, aim, e, ctrl.sel.length, shots, mm.target.sunk.join(), mm.own.sunk.join()].join();
+    // Simultaneous: whether their salvo is in yet.
+    const ready = turns > 1 && h('p', { cls: 'small muted', id: 'them-ready' }, mm.round.them ? "They're ready." : "They're still picking.");
+    const key = [mm.phase, !!tip, item, dir, armed, tapped, aim, e, ctrl.sel.length, shots, mm.target.sunk.join(), mm.own.sunk.join(), !!mm.round.them].join();
     if (key === actionsKey) return;
     actionsKey = key;
-    if (mode !== 2) {
-      const fire = mode === 1 && btn(`Fire ${ctrl.sel.length}/${shots}`, () => ctrl.fireSalvo(), 'primary wide', 'fire');
+    if (!hasItems) {
+      const fire = !!turns && btn(`Fire ${ctrl.sel.length}/${shots}`, () => ctrl.fireSalvo(), 'primary wide', 'fire');
       if (fire) fire.disabled = !my || ctrl.sel.length !== shots;
-      side.replaceChildren(tally(mm), h('div', 'act', tip || (!fire && h('p', 'small muted rules', rulesLine(mm.config))), fire));
+      side.replaceChildren(tally(mm), h('div', 'act', tip || ready || (!fire && h('p', 'small muted rules', rulesLine(mm.config))), fire));
       return;
     }
     const it = item === null ? null : ITEMS[item]!;
@@ -355,7 +357,7 @@ export function battle(ctrl: Controller): Screen {
     const q = ctrl.queue;
     const qNames = q.map((c) => cellName(c, n)).join(', ');
     el.dataset.turn = theirTurn ? 'them' : 'me';
-    stripText.textContent = s.banner ?? (my ? 'Your turn' : mm.phase === 'awaitingAnswer' ? 'Firing…' : 'Their turn');
+    stripText.textContent = s.banner ?? (my ? 'Your turn' : mm.phase !== 'awaitingAnswer' ? 'Their turn' : mm.config.turns > 1 ? 'Waiting for them' : 'Firing…');
     const dn = dirName();
     const r = ctrl.lastResult;
     stripSub.textContent = s.banner
@@ -366,7 +368,7 @@ export function battle(ctrl: Controller): Screen {
           ? 'Tap again to fire' + (dn ? ', ' + dn.toLowerCase() : '')
           : theirTurn && q.length
             ? 'Next: ' + qNames
-            : my && r.startsWith('You')
+            : my && r.startsWith('You') && mm.config.turns < 2
                 ? r + '. Shoot again.'
                 : r;
     clear.hidden = !(theirTurn && q.length);

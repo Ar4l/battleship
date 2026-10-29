@@ -2,8 +2,8 @@ import { decodeFleet, decodeShip, encodeFleet, encodeShip } from '../game/board'
 import { decodeConfig, encodeConfig } from '../game/rules';
 import type { Config, Entry, Fleet, ItemId } from '../game/types';
 
-/** 3: board sizes, islands, Russian mode, Airstrike; 2-byte ships; config carries size + seed. */
-export const PROTO_VERSION = 3;
+/** 4: independent fleet, turns and items settings (5-byte config); simultaneous salvo. */
+export const PROTO_VERSION = 4;
 
 export type Msg =
   | { t: 'hello'; ver: number; role: 0 | 1 }
@@ -56,7 +56,7 @@ export function decode(u: Uint8Array): Msg | null {
       return n === 17 ? { t: 'coin', nonce: u.slice(1) } : null;
     case OP.fire: {
       const cells = [...u.subarray(1)];
-      return n > 1 && n < 12 && cells.every((x) => x < 196) ? { t: 'fire', cells } : null;
+      return n > 1 && n < 7 && cells.every((x) => x < 196) ? { t: 'fire', cells } : null;
     }
     case OP.answer: {
       const entries: Entry[] = [];

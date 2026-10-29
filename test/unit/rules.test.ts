@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canPlace, decodeConfig, encodeConfig, fleetLegal, geoOf, makeIslands, occupancy, rulesLine, shipCells } from '../../src/game/rules';
+import { canPlace, decodeConfig, encodeConfig, fleetLegal, geoOf, makeIslands, normConfig, occupancy, rulesLine, shipCells } from '../../src/game/rules';
 import { cellName, decodeFleet, encodeFleet, parseCell } from '../../src/game/board';
 import { randomFleet } from '../../src/game/random';
 import { seededRng } from '../../src/game/seeded';
@@ -38,26 +38,41 @@ describe('rules', () => {
   });
   it('config bytes round-trip', () => {
     const cs: Config[] = [
-      cfgOf({ mode: 0, extraShot: true, noTouch: true, timer: 30 }),
-      cfgOf({ mode: 1 }),
-      cfgOf({ mode: 2, extraShot: true, noTouch: true, timer: 60, size: 3, seed: 51234 }),
-      cfgOf({ mode: 3, extraShot: true, noTouch: true, size: 1, seed: 7 }),
+      cfgOf({ extraShot: true, noTouch: true, timer: 30 }),
+      cfgOf({ turns: 1 }),
+      cfgOf({ turns: 2, noTouch: true, timer: 15, size: 2, seed: 9 }),
+      cfgOf({ items: true, extraShot: true, noTouch: true, timer: 60, size: 3, seed: 51234 }),
+      cfgOf({ russian: true, extraShot: true, noTouch: true, size: 1, seed: 7 }),
+      cfgOf({ russian: true, turns: 2, noTouch: true }),
     ];
     for (const c of cs) expect(decodeConfig(encodeConfig(c))).toEqual(c);
-    expect(encodeConfig(cs[2]!)).toEqual([2, 3, 60, 3, 200, 34]);
-    expect(decodeConfig([4, 0, 0, 1, 0, 0])).toBeNull();
-    expect(decodeConfig([0, 4, 0, 1, 0, 0])).toBeNull();
-    expect(decodeConfig([0, 0, 20, 1, 0, 0])).toBeNull();
-    expect(decodeConfig([0, 0, 0, 4, 0, 0])).toBeNull();
+    expect(encodeConfig(cs[3]!)).toEqual([11, 60, 3, 200, 34]);
+    expect(encodeConfig(cs[5]!)).toEqual([38, 0, 1, 0, 0]);
+    expect(decodeConfig([48, 0, 1, 0, 0])).toBeNull(); // turns 3
+    expect(decodeConfig([0, 20, 1, 0, 0])).toBeNull();
+    expect(decodeConfig([0, 0, 4, 0, 0])).toBeNull();
     expect(decodeConfig([0, 0, 0])).toBeNull();
-    // Extra shot: Classic and Items, not Salvo. Russian forces it, no-touch and 10×10.
-    expect(decodeConfig([1, 1, 0, 1, 0, 0])!.extraShot).toBe(false);
-    expect(decodeConfig([2, 1, 0, 1, 0, 0])!.extraShot).toBe(true);
-    expect(decodeConfig([3, 0, 0, 3, 0, 0])).toMatchObject({ extraShot: true, noTouch: true, size: 1 });
-    expect(rulesLine(cs[1]!)).toBe('Salvo · No timer');
-    expect(rulesLine(cfgOf({ mode: 1, noTouch: true, timer: 30 }))).toBe("Salvo · Ships can't touch · 30 s turns");
-    expect(rulesLine(cfgOf({ size: 2 }))).toBe('Classic · Large 12×12 · No timer');
-    expect(rulesLine(cfgOf({ mode: 3 }))).toBe("Russian · Extra shot after a hit · Ships can't touch · No timer");
+    expect(decodeConfig([0, 0, 0, 1, 0, 0])).toBeNull();
+  });
+  it('normConfig: one place for every implied setting', () => {
+    const n = (c: Partial<Config>) => normConfig(cfgOf(c));
+    // Items and extra shot are one-shot turns only.
+    for (const turns of [1, 2] as const) expect(n({ turns, items: true, extraShot: true })).toMatchObject({ items: false, extraShot: false });
+    expect(n({ items: true, extraShot: true })).toMatchObject({ items: true, extraShot: true });
+    // Russian: 10×10 and no touching always; hit shoots again under one-shot turns only.
+    expect(n({ russian: true, size: 3 })).toMatchObject({ size: 1, noTouch: true, extraShot: true });
+    expect(n({ russian: true, items: true })).toMatchObject({ items: true, extraShot: true });
+    for (const turns of [1, 2] as const) expect(n({ russian: true, turns, extraShot: true })).toMatchObject({ turns, size: 1, noTouch: true, extraShot: false, items: false });
+    expect(n({ seed: 0x12345 }).seed).toBe(0x2345);
+    // Decoding normalises too.
+    expect(decodeConfig([1 | 8 | 16, 0, 1, 0, 0])).toMatchObject({ turns: 1, items: false, extraShot: false });
+  });
+  it('rules line reads naturally and leaves out what Russian implies', () => {
+    expect(rulesLine(cfgOf())).toBe('One shot · 10×10 · No timer');
+    expect(rulesLine(cfgOf({ turns: 1, noTouch: true, timer: 30 }))).toBe("Salvo · 10×10 · Ships can't touch · 30 s turns");
+    expect(rulesLine(cfgOf({ items: true, extraShot: true, size: 2 }))).toBe('One shot · Items · 12×12 · Extra shot after a hit · No timer');
+    expect(rulesLine(cfgOf({ russian: true, turns: 2 }))).toBe('Russian · Salvo, simultaneous · 10×10 · No timer');
+    expect(rulesLine(cfgOf({ russian: true }))).toBe('Russian · One shot · 10×10 · No timer');
   });
 });
 
@@ -70,7 +85,7 @@ describe('board sizes, fleets and islands', () => {
     for (const g of t) expect(g.names.length).toBe(g.fleet.length);
   });
   it('Russian: 1×4, 2×3, 3×2, 4×1 on 10×10, no touching', () => {
-    const g = geoOf(cfgOf({ mode: 3, size: 3 }));
+    const g = geoOf(cfgOf({ russian: true, size: 3 }));
     expect([g.n, g.fleet.join(''), g.total, g.noTouch, g.islands.size]).toEqual([10, '4332221111', 20, true, 0]);
     const rng = seededRng(3);
     for (let i = 0; i < 200; i++) expect(fleetLegal(g, randomFleet(g, rng))).toBe(true);

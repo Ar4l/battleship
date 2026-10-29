@@ -7,12 +7,17 @@ export interface Ship {
 }
 /** One ship per Geo.fleet entry, in that order. */
 export type Fleet = Ship[];
-export type Mode = 0 | 1 | 2 | 3; // classic, salvo, items, russian
+/** One shot a turn, Salvo, or Salvo with both players firing at once. */
+export type Turns = 0 | 1 | 2;
 export type Timer = 0 | 15 | 30 | 60;
 /** Board size index: 0 small 8×8, 1 classic 10×10, 2 large 12×12, 3 huge 14×14. */
 export type Size = 0 | 1 | 2 | 3;
 export interface Config {
-  mode: Mode;
+  /** Russian fleet: 1×4, 2×3, 3×2, 4×1 on 10×10, no touching. */
+  russian: boolean;
+  turns: Turns;
+  /** Energy and items (one-shot turns only). */
+  items: boolean;
   extraShot: boolean;
   noTouch: boolean;
   timer: Timer;

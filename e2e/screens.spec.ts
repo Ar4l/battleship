@@ -48,7 +48,7 @@ for (const size of SIZES)
       await shot(A, `01-home-${tag}`);
       await A.click('#create');
       await expect(A.locator('#room-code')).toHaveText(/^\d{4}$/);
-      await A.getByRole('radio', { name: 'Items' }).click();
+      await A.getByRole('switch', { name: 'Items' }).click();
       await shot(A, `02-lobby-host-${tag}`);
       await B.goto('./#4821');
       await shot(B, `03-lobby-guest-${tag}`);
@@ -170,7 +170,7 @@ for (const [width, height] of [[320, 740], [360, 740], [750, 342], [863, 360]] a
     await A.goto('./');
     await fits(A, 'home');
     await A.click('#create');
-    await A.getByRole('radio', { name: 'Items' }).click();
+    await A.getByRole('switch', { name: 'Items' }).click();
     await fits(A, 'lobby');
     await A.click('#use-direct');
     await expect(A.locator('#offer-link')).toBeVisible();

@@ -45,6 +45,28 @@ test.describe('direct-link fallback (offline-safe)', () => {
     await expect(B.locator('#verdict')).toHaveText('Fleet verified');
   });
 
+  test('Simultaneous salvo: both pick at once, wait for each other, then both results land', async ({ browser }) => {
+    const A = await player(browser);
+    const B = await player(browser);
+    await connectDirect(A, B, 'Simultaneous');
+    await expect(B.locator('.placement .rules')).toHaveText('Salvo, simultaneous · 10×10 · No timer');
+    await readyBoth(A, B);
+    for (const p of [A, B]) await expect(p.locator('.strip-main')).toHaveText('Your turn');
+    await expect(B.locator('#them-ready')).toHaveText("They're still picking.");
+    for (const c of [0, 1, 2, 3, 4]) await targetCell(A, c).click();
+    await A.click('#fire');
+    await expect(A.locator('.strip-main')).toHaveText('Waiting for them');
+    await expect(B.locator('#them-ready')).toHaveText("They're ready.");
+    await expect(B.locator('#clear-queue')).toBeHidden();
+    for (const c of [90, 91, 92, 93, 94]) await targetCell(B, c).click();
+    await B.click('#fire');
+    for (const p of [A, B]) await expect(p.locator('.strip-sub')).toHaveText(/^You .* · They /);
+    await playOut(A, B, A, 'sim');
+    await expect(A.locator('#result')).toHaveText('You won');
+    await expect(A.locator('#verdict')).toHaveText('Fleet verified');
+    await expect(B.locator('#verdict')).toHaveText('Fleet verified');
+  });
+
   test('Russian: ten ships, a hit shoots again, verified at the end', async ({ browser }) => {
     const A = await player(browser);
     const B = await player(browser);

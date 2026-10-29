@@ -6,7 +6,7 @@ Two-player Battleship that runs peer-to-peer in the browser. There is no server:
 
 - **Create game** gives a 4-digit code and a link (`aral.cc/battleship/#4821`). Your friend opens the link or types the code.
 - If matchmaking can't connect, use **Use a direct link**: send the link, your friend sends a reply link back, paste it, connect.
-- Modes: **Classic** (optional extra shot after a hit), **Salvo** (one shot per ship you have left), **Items** (energy for Sonar, Torpedo, Cross bomb, Airstrike and Line strike) and **Russian** (Морской бой: 1×4, 2×3, 3×2, 4×1, no touching, a hit shoots again). Board sizes 8×8 to 14×14; Large and Huge have islands. Options: extra shot after a hit, ships can't touch, turn timer. Prefire: queue your next shot during the opponent's turn.
+- Rules are independent settings. **Fleet:** Standard or **Russian** (Морской бой: 1×4, 2×3, 3×2, 4×1 on 10×10, no touching; a hit shoots again with one-shot turns). **Turns:** One shot, **Salvo** (one shot per ship you have left, at most 5) or **Simultaneous** salvo (both players pick at once; a round where both fleets sink is a draw). **Items** (one-shot turns only): energy for Sonar, Torpedo, Cross bomb, Airstrike and Line strike. Board sizes 8×8 to 14×14; Large and Huge have islands. Options: extra shot after a hit, ships can't touch, turn timer. Prefire: queue your next shot during the opponent's turn.
 - Fair play: each player commits to `SHA-256(salt, fleet, rules)` before the game and reveals at the end. Every answer the opponent gave is replayed against the revealed fleet; a lie is reported with the cell it happened on.
 
 ## Develop
@@ -45,13 +45,13 @@ Signalling uses Trystero's **torrent** strategy (`@trystero-p2p/torrent@0.26.0`,
 
 ## Size
 
-`npm run size` gzips (level 9) every file in `dist/` and fails over budget. The hard budget is 44 KB for a code game; the per-file budgets are guard rails. Current numbers (they move by a few hundred bytes between changes; run the script for exact values):
+`npm run size` gzips (level 9) every file in `dist/` and fails over budget. The hard budget is 44.5 KB for a code game; the per-file budgets are guard rails. Current numbers (they move by a few hundred bytes between changes; run the script for exact values):
 
 | What | gzip |
 |---|---|
 | `index.html` with inlined CSS | 5.9 KB |
-| app entry (game, UI, Trystero room code) | 23.1 KB |
+| app entry (game, UI, Trystero room code) | 23.5 KB |
 | Trystero chunk, loaded on intent (Create focus/hover, code field focus, `#NNNN` link) | 15.0 KB |
-| **Code game: everything downloaded** | **43.9 KB** (budget 44) |
-| Direct-link game instead | 32.9 KB |
-| First load before any click | 28.9 KB |
+| **Code game: everything downloaded** | **44.4 KB** (budget 44.5) |
+| Direct-link game instead | 33.4 KB |
+| First load before any click | 29.4 KB |

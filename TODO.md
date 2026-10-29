@@ -24,9 +24,9 @@ Tick items (`[x]`) when done and verified. Owner in brackets.
 - [x] Russian placement legend: one non-wrapping group per class, name and ×n first, then its capsules [ui]
 
 ## Round 5: orthogonal rules
-- [ ] Replace Mode with independent settings: Fleet (Standard / Russian), Turns (One shot / Salvo / Salvo simultaneous), Items (Off / On, one-shot turns only) [logic + ui]
-- [ ] Russian + Salvo works (Russian drops "hit shoots again" under Salvo); Salvo shots = ships left, capped at 5 [logic]
-- [ ] Simultaneous Salvo: both pick shots at once, resolve when both sent; draw if both fleets sink in the same round; prefire hidden in this mode [logic + ui]
+- [x] Replace Mode with independent settings: Fleet (Standard / Russian), Turns (One shot / Salvo / Salvo simultaneous), Items (Off / On, one-shot turns only) [logic + ui]
+- [x] Russian + Salvo works (Russian drops "hit shoots again" under Salvo); Salvo shots = ships left, capped at 5 [logic]
+- [x] Simultaneous Salvo: both pick shots at once, resolve when both sent; draw if both fleets sink in the same round; prefire hidden in this mode [logic + ui]
 
 ## UI notes (round 4)
 
@@ -39,14 +39,21 @@ Where the UI differs from UX-SPEC.md, mostly to stay under 44 KB:
 - Labels on a receded board are not dimmed to 70%, because axe flags the contrast.
 - No stipple pattern on land.
 
+## UI notes (round 5)
+
+- The Turns control reads One shot / Salvo / **Simultaneous** (the rules line says "Salvo, simultaneous"): "Salvo (simultaneous)" does not fit a 320 px phone. Segments keep equal widths but never get narrower than their label.
+- Simultaneous: the side panel says "They're still picking." / "They're ready."; after sending, the turn bar says "Waiting for them". The result line names both salvos ("You hit E4 · They missed all 5").
+- The end screen's "Change mode" is now "Change rules".
+
 ## Logic API for UI
 
-Protocol is now version 3 (CONFIG is 7 bytes, ships are 2 bytes). Full rules are in PLAN.md §5–7.1.
+Protocol is now version 4 (CONFIG is 6 bytes, ships are 2 bytes). Full rules are in PLAN.md §5–7.1.
 
-**Config** (`game/types.ts`): `{ mode: 0 classic | 1 salvo | 2 items | 3 russian, extraShot, noTouch, timer, size: 0 small 8×8 | 1 classic 10×10 | 2 large 12×12 | 3 huge 14×14, seed }`.
-- Use `ctrl.setConfig({ size })`, `ctrl.setConfig({ mode: 3 })`, and so on. The controller normalises through `normConfig`: Russian forces `size 1`, `noTouch` and `extraShot`; Salvo forces `extraShot` off. Extra shot is valid in Classic and Items.
+**Config** (`game/types.ts`, round 5): `{ russian, turns: 0 one shot | 1 salvo | 2 simultaneous, items, extraShot, noTouch, timer, size: 0 small 8×8 | 1 classic 10×10 | 2 large 12×12 | 3 huge 14×14, seed }`.
+- Use `ctrl.setConfig({ size })`, `ctrl.setConfig({ russian: true })`, and so on. The controller normalises through `normConfig`: Russian forces `size 1` and `noTouch`, and `extraShot` with one-shot turns; Salvo turns force `items` and `extraShot` off.
+- Simultaneous: both sides are `myTurn` while picking and `awaitingAnswer` after sending; `match.round.them` is set once their salvo is in. `match.winner` can be `'draw'`.
 - The host rolls `seed` itself for every game. The UI never sets it.
-- `rules`: `MODE_NAMES` (now includes 'Russian'), `SIZES` = [8, 10, 12, 14], `SIZE_NAMES` = ['Small', 'Classic', 'Large', 'Huge'], `rulesLine(config)` (now names the size, e.g. "Large 12×12").
+- `rules`: `SIZES` = [8, 10, 12, 14], `rulesLine(config)` (e.g. "Russian · Salvo, simultaneous · 10×10 · No timer").
 
 **Geometry** (`Geo`, from `geoOf(config)`; memoised, so it is safe to call every render):
 - `n` is the side length. A cell is `row * n + col`.

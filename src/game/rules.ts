@@ -1,12 +1,9 @@
 import { seededRng } from './seeded';
-import type { Cell, Config, Fleet, Geo, Mode, Ship, Size, Timer } from './types';
+import type { Cell, Config, Fleet, Geo, Ship, Size, Timer, Turns } from './types';
 
-export const MODE_NAMES = ['Classic', 'Salvo', 'Items', 'Russian'] as const;
-export const RUSSIAN: Mode = 3;
 export const SIZES = [8, 10, 12, 14] as const;
-export const SIZE_NAMES = ['Small', 'Classic', 'Large', 'Huge'] as const;
 export const TIMERS: readonly Timer[] = [0, 15, 30, 60];
-export const DEFAULT_CONFIG: Config = { mode: 0, extraShot: false, noTouch: false, timer: 0, size: 1, seed: 0 };
+export const DEFAULT_CONFIG: Config = { russian: false, turns: 0, items: false, extraShot: false, noTouch: false, timer: 0, size: 1, seed: 0 };
 
 // Fleet per board size (lengths, names), then the Russian fleet: 1×4, 2×3, 3×2, 4×1.
 const FLEETS = ['4332', '54332', '5433322', '54433322', '4332221111'];
@@ -55,17 +52,21 @@ export function makeIslands(n: number, count: number, seed: number): Set<Cell> {
   return out;
 }
 
-/** Fill in the settings other settings imply: Russian is 10×10, no touching, hit shoots again; Salvo has no extra shot. */
+/**
+ * Fill in the settings other settings imply: Russian is 10×10 with no touching, and
+ * a hit shoots again under one-shot turns. Items and extra shot are one-shot turns only.
+ */
 export function normConfig(c: Config): Config {
-  const ru = c.mode === RUSSIAN;
-  return { ...c, extraShot: ru || (c.mode !== 1 && c.extraShot), noTouch: ru || c.noTouch, size: ru ? 1 : c.size, seed: c.seed & 0xffff };
+  const ru = c.russian;
+  const one = !c.turns;
+  return { ...c, items: one && c.items, extraShot: one && (ru || c.extraShot), noTouch: ru || c.noTouch, size: ru ? 1 : c.size, seed: c.seed & 0xffff };
 }
 
 const geos = new Map<string, Geo>();
 /** The board a config is played on (memoised: the same object for the same rules). */
 export function geoOf(config: Config): Geo {
   const c = normConfig(config);
-  const f = c.mode === RUSSIAN ? 4 : c.size;
+  const f = c.russian ? 4 : c.size;
   const key = [f, c.size, c.size > 1 ? c.seed : 0, c.noTouch].join();
   let g = geos.get(key);
   if (!g) {
@@ -108,19 +109,29 @@ export const fleetLegal = (g: Geo, fleet: Fleet): boolean => fleet.length === g.
 /** Can ship i be placed at `ship` given the rest of the fleet? */
 export const canPlace = (g: Geo, fleet: Fleet, i: number, ship: Ship): boolean => fleetLegal(g, fleet.map((s, k) => (k === i ? ship : s)));
 
-export const encodeConfig = (c: Config): number[] => [c.mode, +c.extraShot | (+c.noTouch << 1), c.timer, c.size, c.seed >> 8, c.seed & 255];
+/** 5 bytes: flags (extra shot, no touch, Russian, items, turns << 4), timer, size, seed. */
+export const encodeConfig = (c: Config): number[] => [+c.extraShot | (+c.noTouch << 1) | (+c.russian << 2) | (+c.items << 3) | (c.turns << 4), c.timer, c.size, c.seed >> 8, c.seed & 255];
 
 export function decodeConfig(b: ArrayLike<number>): Config | null {
-  const [mode = 9, flags = 9, timer = 9, size = 9, hi = 0, lo = 0] = Array.from(b);
-  return b.length !== 6 || mode > 3 || flags > 3 || size > 3 || !TIMERS.includes(timer as Timer)
+  const [f = 99, timer = 9, size = 9, hi = 0, lo = 0] = Array.from(b);
+  return b.length !== 5 || f > 47 || size > 3 || !TIMERS.includes(timer as Timer)
     ? null
-    : normConfig({ mode: mode as Mode, extraShot: !!(flags & 1), noTouch: !!(flags & 2), timer: timer as Timer, size: size as Size, seed: (hi << 8) | lo });
+    : normConfig({ extraShot: !!(f & 1), noTouch: !!(f & 2), russian: !!(f & 4), items: !!(f & 8), turns: (f >> 4) as Turns, timer: timer as Timer, size: size as Size, seed: (hi << 8) | lo });
 }
 
+/** e.g. "Russian · Salvo, simultaneous · 10×10 · No timer". Implied rules are left out. */
 export function rulesLine(config: Config): string {
   const c = normConfig(config);
   const n = SIZES[c.size];
-  return [MODE_NAMES[c.mode], c.size !== 1 && `${SIZE_NAMES[c.size]} ${n}×${n}`, c.extraShot && 'Extra shot after a hit', c.noTouch && "Ships can't touch", c.timer ? c.timer + ' s turns' : 'No timer']
+  return [
+    c.russian && 'Russian',
+    ['One shot', 'Salvo', 'Salvo, simultaneous'][c.turns],
+    c.items && 'Items',
+    `${n}×${n}`,
+    !c.russian && c.extraShot && 'Extra shot after a hit',
+    !c.russian && c.noTouch && "Ships can't touch",
+    c.timer ? c.timer + ' s turns' : 'No timer',
+  ]
     .filter(Boolean)
     .join(' · ');
 }

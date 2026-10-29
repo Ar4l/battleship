@@ -67,12 +67,12 @@ async function playOut(H: Controller, G: Controller, settle = true) {
 
 describe('controller over an in-memory transport', () => {
   it.each([
-    ['Classic', { mode: 0 } as const],
-    ['Classic with extra shot', { mode: 0, extraShot: true } as const],
-    ['Salvo', { mode: 1 } as const],
+    ['Classic', {} as const],
+    ['Classic with extra shot', { extraShot: true } as const],
+    ['Salvo', { turns: 1 } as const],
   ])('plays a full %s game to a verified verdict, then rematches with the other starter', async (_, cfg) => {
     const { H, G } = await connect(cfg);
-    expect(G.config.mode).toBe(cfg.mode);
+    expect(G.config).toEqual(H.config);
     await placeAndStart(H, G);
     const hostStarted = H.match!.iStarted;
     expect(G.match!.iStarted).toBe(!hostStarted);
@@ -92,9 +92,9 @@ describe('controller over an in-memory transport', () => {
   });
 
   it.each([
-    ['Russian', { mode: 3 } as const],
-    ['Large Items with islands and extra shot', { mode: 2, size: 2, extraShot: true } as const],
-    ['Huge Salvo', { mode: 1, size: 3 } as const],
+    ['Russian', { russian: true } as const],
+    ['Large Items with islands and extra shot', { items: true, size: 2, extraShot: true } as const],
+    ['Huge Salvo', { turns: 1, size: 3 } as const],
     ['Small Classic', { size: 0 } as const],
   ])('plays a %s game to a verified verdict; both sides agree on the board', async (_, cfg) => {
     const { H, G } = await connect(cfg);
@@ -115,7 +115,7 @@ describe('controller over an in-memory transport', () => {
   });
 
   it('prefire: a shot queued during their turn fires 300 ms into my turn', async () => {
-    const { H, G } = await connect({ mode: 2 });
+    const { H, G } = await connect({ items: true });
     await placeAndStart(H, G);
     const [me, them] = H.match!.phase === 'theirTurn' ? [H, G] : [G, H];
     them.prefire(50); // not their phase: ignored
@@ -135,7 +135,7 @@ describe('controller over an in-memory transport', () => {
   });
 
   it('prefire with extra shot: up to 3, later ones fire only after hits, a move of my own cancels', async () => {
-    const { H, G } = await connect({ mode: 0, extraShot: true });
+    const { H, G } = await connect({ extraShot: true });
     await placeAndStart(H, G);
     const [me, them] = H.match!.phase === 'theirTurn' ? [H, G] : [G, H];
     const ships = shipCellsOf(me === H ? FLEET_B : FLEET_A);
@@ -168,7 +168,7 @@ describe('controller over an in-memory transport', () => {
   });
 
   it('prefire in Salvo: up to my shots; too few become the selection; fired cells are dropped', async () => {
-    const { H, G } = await connect({ mode: 1 });
+    const { H, G } = await connect({ turns: 1 });
     await placeAndStart(H, G);
     const [me, them] = H.match!.phase === 'theirTurn' ? [H, G] : [G, H];
     for (const c of [90, 91, 92, 93, 94, 95]) me.prefire(c);
@@ -187,7 +187,7 @@ describe('controller over an in-memory transport', () => {
   });
 
   it('plays an Items game using every item', async () => {
-    const { H, G } = await connect({ mode: 2 });
+    const { H, G } = await connect({ items: true });
     await placeAndStart(H, G);
     // Force the host to have the first turn by passing if needed.
     if (G.match!.phase === 'myTurn') {
@@ -216,7 +216,7 @@ describe('controller over an in-memory transport', () => {
   });
 
   it('detects a lying defender and names the cell', async () => {
-    const { H, G } = await connect({ mode: 0 });
+    const { H, G } = await connect({});
     await placeAndStart(H, G);
     lie(G, 9); // J1, part of FLEET_B's carrier
     await playOut(H, G);
@@ -229,7 +229,7 @@ describe('controller over an in-memory transport', () => {
 
   it('turn timer: auto-acts with a random shot (Salvo fills the selection)', async () => {
     for (const mode of [0, 1] as const) {
-      const { H, G } = await connect({ mode, timer: 15 });
+      const { H, G } = await connect({ turns: mode, timer: 15 });
       await placeAndStart(H, G);
       const me = H.match!.phase === 'myTurn' ? H : G;
       expect(me.deadline).toBeGreaterThan(Date.now());
@@ -254,8 +254,41 @@ describe('controller over an in-memory transport', () => {
     expect(G.state.s).toBe('home');
   });
 
+  it('simultaneous salvo: rounds settle on both sides; both fleets sunk in one round is a verified draw', async () => {
+    const { H, G } = await connect({ turns: 2 });
+    await placeAndStart(H, G);
+    const both = (f: (c: Controller) => boolean) => f(H) && f(G);
+    expect(both((c) => c.match!.phase === 'myTurn')).toBe(true);
+    const ships = new Map([[H, shipCellsOf(FLEET_B)], [G, shipCellsOf(FLEET_A)]]);
+    for (let round = 0; !both((c) => c.state.s === 'end'); round++) {
+      for (const c of [H, G]) {
+        const m = c.match!;
+        expect(c.attack({ k: 'fire', cells: ships.get(c)!.filter((x) => !m.target.shot.has(x)).slice(0, shotsAllowed(m, 'me')) })).toBe(true);
+      }
+      await until(() => both((c) => c.state.s === 'end' || c.match!.phase === 'myTurn'));
+      if (!round) expect(H.lastResult).toMatch(/^You (hit|sank) .* · They (hit|sank) /);
+    }
+    await until(() => both((c) => (c.state as { verdict: string }).verdict !== 'pending'));
+    expect([H.match!.winner, G.match!.winner]).toEqual(['draw', 'draw']);
+    expect([(H.state as { verdict: string }).verdict, (G.state as { verdict: string }).verdict]).toEqual(['verified', 'verified']);
+  });
+
+  it('simultaneous salvo: the turn timer sends the current pick; their salvo is held until mine is in', async () => {
+    const { H, G } = await connect({ turns: 2, timer: 15 });
+    await placeAndStart(H, G);
+    H.toggleSel(0);
+    H.autoAct();
+    expect(H.match!.phase).toBe('awaitingAnswer');
+    await until(() => !!G.match!.round.them);
+    expect([G.match!.phase, G.match!.own.shot.size]).toEqual(['myTurn', 0]);
+    G.autoAct();
+    await until(() => H.match!.phase === 'myTurn' && G.match!.phase === 'myTurn');
+    expect([H.match!.target.shot.size, H.match!.target.shot.has(0), G.match!.own.shot.size]).toEqual([5, true, 5]);
+    expect(H.lastResult).toMatch(/^Time's up\. You .* · They /);
+  });
+
   it('salvo results name the shooter', async () => {
-    const { H, G } = await connect({ mode: 1 });
+    const { H, G } = await connect({ turns: 1 });
     await placeAndStart(H, G);
     const me = H.match!.phase === 'myTurn' ? H : G;
     const them = me === H ? G : H;
@@ -267,15 +300,15 @@ describe('controller over an in-memory transport', () => {
   });
 
   it('a REVEAL mid-battle ends the game as their forfeit; a late CONFIG is ignored', async () => {
-    const { H, G } = await connect({ mode: 0 });
+    const { H, G } = await connect({});
     await placeAndStart(H, G);
     raw(H, { t: 'reveal', salt: new Uint8Array(16), fleet: FLEET_A });
     await until(() => G.state.s === 'end');
     expect(G.match!.winner).toBe('me');
-    raw(H, { t: 'config', config: cfgOf({ mode: 2, noTouch: true }) });
+    raw(H, { t: 'config', config: cfgOf({ items: true, noTouch: true }) });
     await new Promise((r) => setTimeout(r, 20));
     expect(G.state.s).toBe('end');
-    expect(G.config.mode).toBe(0);
+    expect(G.config.items).toBe(false);
   });
 
   it('keeps saying HELLO until the other side hears it', async () => {
@@ -345,20 +378,20 @@ describe('controller over an in-memory transport', () => {
     }
   });
 
-  it('rematch: the host changes the mode after the guest already asked', async () => {
-    const { H, G } = await connect({ mode: 0 });
+  it('rematch: the host changes the rules after the guest already asked', async () => {
+    const { H, G } = await connect({});
     await placeAndStart(H, G);
     await playOut(H, G);
     G.rematch();
     await until(() => H.state.s === 'end' && H.state.rematch.them);
     H.toggleEditing();
-    H.setConfig({ mode: 1 });
+    H.setConfig({ turns: 1 });
     H.rematch();
     await until(() => H.state.s === 'placement' && G.state.s === 'placement');
-    expect(G.config.mode).toBe(1);
+    expect(G.config.turns).toBe(1);
     await placeAndStart(H, G);
-    expect(H.match!.config.mode).toBe(1);
-    expect(G.match!.config.mode).toBe(1);
+    expect(H.match!.config.turns).toBe(1);
+    expect(G.match!.config.turns).toBe(1);
   });
 
   describe('a phone that locks or switches apps', () => {

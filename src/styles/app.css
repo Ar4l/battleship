@@ -254,8 +254,8 @@ input {
   width: 100%;
 }
 .seg label {
+  /* Equal widths, but never narrower than the label: "Simultaneous" fits a 320 px phone. */
   flex: 1;
-  min-width: 0;
 }
 .seg label,
 .toggle {

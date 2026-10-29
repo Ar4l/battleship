@@ -63,6 +63,8 @@ export class Controller {
   private gotFrame = false;
   lastCode = 0;
   private readying = false;
+  /** My answer to their latest attack (simultaneous: shown when the round settles). */
+  private answered: Answer | null = null;
   private timedOut = false;
   /** The link to the opponent dropped and may come back. */
   lost = false;
@@ -363,7 +365,7 @@ export class Controller {
 
   /** How many shots prefire may queue: Salvo, the shots I'll have; with extra shot, 3 (later ones fire only after hits); else 1. */
   prefireMax(m: Match): number {
-    return m.config.mode === 1 ? shotsAllowed(m, 'me') : m.config.extraShot ? 3 : 1;
+    return m.config.turns ? shotsAllowed(m, 'me') : m.config.extraShot ? 3 : 1;
   }
 
   /**
@@ -385,7 +387,7 @@ export class Controller {
 
   /** My turn started with a queue: after 300 ms (the UI says "Firing E4"), fire it. */
   private firePrefire(m: Match): void {
-    const salvo = m.config.mode === 1;
+    const salvo = !!m.config.turns;
     const n = shotsAllowed(m, 'me');
     // Drop cells fired at meanwhile and shots I no longer have.
     this.queue = this.queue.filter((c) => !m.target.shot.has(c)).slice(0, salvo ? n : 3);
@@ -422,7 +424,9 @@ export class Controller {
     this.timer('turn');
     this.deadline = 0;
     this.send(a.k === 'fire' ? { t: 'fire', cells: a.cells } : { t: 'use', item: a.item, a: a.a, b: a.b });
-    this.timer('stall', 30000, () => this.stalled('awaitingAnswer'));
+    // Simultaneous: they may still be picking, so allow their turn timer (none: they may think as long as they like).
+    const secs = this.config.timer * 1000;
+    if (s.match.config.turns < 2 || secs) this.timer('stall', s.match.config.turns < 2 ? 30000 : secs + 15000, () => this.stalled('awaitingAnswer'));
     this.emit();
     return true;
   }
@@ -456,7 +460,7 @@ export class Controller {
   autoAct(): void {
     const m = this.match;
     if (!m || m.phase !== 'myTurn') return;
-    const cells = m.config.mode === 1 ? this.sel.slice() : [];
+    const cells = m.config.turns ? this.sel.slice() : [];
     const free = untargeted(m).filter((c) => !cells.includes(c));
     while (cells.length < shotsAllowed(m, 'me') && free.length) cells.push(free.splice(this.rng(free.length), 1)[0]!);
     this.timedOut = this.attack({ k: 'fire', cells });
@@ -547,13 +551,27 @@ export class Controller {
     this.turnStarted();
   }
 
+  /**
+   * Simultaneous: called after each half of a round. Until both are in, only the
+   * "they're ready" state changes; then both boards and the result line update.
+   */
+  private settled(s: Battle): void {
+    const m = s.match;
+    if (m.round.me || m.round.them || m.pending) return this.emit();
+    const mine = m.transcript.at(-1)!.answer;
+    this.fx = { target: m.target.last.slice(), own: m.own.last.slice() };
+    this.result(s, `${this.timedOut ? "Time's up. " : ''}${this.describe(mine, true)} · ${this.describe(this.answered!, false)}`, mine);
+    this.timedOut = false;
+  }
+
   private onAttack(a: Attack): void {
     const s = this.state;
     if (s.s !== 'battle') return;
     const r = remoteAttack(s.match, a);
     if ('cheat' in r) return this.cheat(r.cheat);
-    const w = r.answer;
+    const w = (this.answered = r.answer);
     this.send(w.k === 'sonar' ? { t: 'sonar', count: w.count } : { t: 'answer', entries: w.entries });
+    if (s.match.config.turns > 1) return this.settled(s);
     this.fx = { target: [], own: s.match.own.last.slice() };
     this.result(s, this.describe(w, false), w);
   }
@@ -564,6 +582,7 @@ export class Controller {
     if (s.match.phase !== 'awaitingAnswer') return this.cheat('they answered out of turn');
     const r = applyAnswer(s.match, a);
     if ('cheat' in r) return this.cheat(r.cheat);
+    if (s.match.config.turns > 1) return this.settled(s);
     // Prefire: what is left when my turn passes was waiting for hits that didn't come.
     if ((s.match.phase as Match['phase']) !== 'myTurn') this.queue = [];
     this.fx = { target: s.match.target.last.slice(), own: [] };
@@ -592,7 +611,7 @@ export class Controller {
   private gameOver(text: string): void {
     const m = this.match!;
     this.toEnd(m, 'pending');
-    this.onAnnounce(`${text}. ${m.winner === 'me' ? 'You won' : 'You lost'}.`);
+    this.onAnnounce(`${text}. ${m.winner === 'me' ? 'You won' : m.winner === 'draw' ? 'Draw' : 'You lost'}.`);
   }
 
   private cheat(reason: string): void {

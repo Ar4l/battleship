@@ -7,8 +7,8 @@ const sha256 = async (tag: string, ...parts: ArrayLike<number>[]): Promise<Uint8
 
 export const randomBytes = (n: number): Uint8Array => crypto.getRandomValues(new Uint8Array(n));
 
-/** SHA-256("bs3/board" || salt || config6 || fleet): binds the fleet to the rules, board size and island seed. */
-export const commitBoard = (salt: Uint8Array, fleet: Fleet, config: Config): Promise<Uint8Array> => sha256('bs3/board', salt, encodeConfig(config), encodeFleet(fleet));
+/** SHA-256("bs4/board" || salt || config || fleet): binds the fleet to the full config (rules, board size, island seed). */
+export const commitBoard = (salt: Uint8Array, fleet: Fleet, config: Config): Promise<Uint8Array> => sha256('bs4/board', salt, encodeConfig(config), encodeFleet(fleet));
 
 /** SHA-256("bs1/coin" || nonce) */
 export const commitCoin = (nonce: Uint8Array): Promise<Uint8Array> => sha256('bs1/coin', nonce);

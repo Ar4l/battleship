@@ -9,7 +9,7 @@ import { seededRng } from '../../src/game/seeded';
 import type { Answer, Attack, Config, Fleet } from '../../src/game/types';
 import { FLEET_A, FLEET_B, G, cfgOf } from './helpers';
 
-const cfg = (c: Partial<Config> = {}): Config => cfgOf({ mode: 2, ...c });
+const cfg = (c: Partial<Config> = {}): Config => cfgOf({ items: true, ...c });
 
 /** Build an honest transcript of attacks against `fleet`. */
 function transcript(fleet: Fleet, attacks: Attack[]): { attack: Attack; answer: Answer }[] {
@@ -43,7 +43,7 @@ describe('commit-reveal', () => {
     const c = await commitBoard(salt, FLEET_A, c0);
     expect(c.length).toBe(32);
     expect(bytesEqual(c, await commitBoard(salt, FLEET_A, { ...c0 }))).toBe(true);
-    for (const p of [{ noTouch: true }, { size: 2 as const }, { seed: 1 }, { mode: 1 as const }, { timer: 15 as const }])
+    for (const p of [{ noTouch: true }, { size: 2 as const }, { seed: 1 }, { turns: 1 as const }, { timer: 15 as const }])
       expect(bytesEqual(c, await commitBoard(salt, FLEET_A, { ...c0, ...p })), JSON.stringify(p)).toBe(false);
     expect(bytesEqual(c, await commitBoard(salt, FLEET_B, c0))).toBe(false);
     expect(bytesEqual(c, await commitBoard(randomBytes(16), FLEET_A, c0))).toBe(false);
@@ -110,7 +110,7 @@ describe('verifyOpponent', () => {
     expect(await verifyOpponent(c, commit, salt, touching, [])).toEqual({ ok: false, reason: 'Their fleet layout was illegal.' });
   });
   it('the attacker-side transcript from the engine verifies', async () => {
-    const c = cfg({ mode: 0 });
+    const c = cfg({});
     const salt = randomBytes(16);
     const commit = await commitBoard(salt, FLEET_B, c);
     const A = createMatch(c, FLEET_A, true);

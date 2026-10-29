@@ -34,7 +34,7 @@ export function end(ctrl: Controller): Screen {
     const v = s.verdict;
     head.replaceChildren(
       label('Game over'),
-      h('h2', { cls: 'h1', id: 'result' }, m.winner === 'me' ? 'You won' : m.winner ? 'You lost' : 'Game over'),
+      h('h2', { cls: 'h1', id: 'result' }, m.winner === 'me' ? 'You won' : m.winner === 'draw' ? 'Draw' : m.winner ? 'You lost' : 'Game over'),
       h(
         'p',
         { cls: 'verdict ' + (v === 'verified' ? 'ok' : v), id: 'verdict' },
@@ -50,7 +50,7 @@ export function end(ctrl: Controller): Screen {
       ['Ships lost', sunkCount(m.own)],
       ['Turns', st.turns],
     ];
-    if (m.config.mode === 2) rows.push(['Items used', st.items]);
+    if (m.config.items) rows.push(['Items used', st.items]);
     stats.replaceChildren(...rows.map(([k, n]) => h('div', null, h('dt', null, k), h('dd', 'mono', n))));
     const host = ctrl.role === 'host';
     const r = s.rematch;
@@ -60,7 +60,7 @@ export function end(ctrl: Controller): Screen {
     const note = s.peerLeft ? 'Opponent left.' : r.me ? (host ? 'Waiting for opponent…' : !r.them && 'Waiting for host…') : r.them && 'Opponent wants a rematch.';
     actions.replaceChildren(
       s.editing ? h('div', 'end-settings', settings(ctrl)) : '',
-      h('div', 'row-btns', rematch, host && open && btn(s.editing ? 'Done' : 'Change mode', () => ctrl.toggleEditing(), '', 'change-mode'), h('button', { cls: 'textlink', onclick: () => ctrl.leave() }, 'Leave')),
+      h('div', 'row-btns', rematch, host && open && btn(s.editing ? 'Done' : 'Change rules', () => ctrl.toggleEditing(), '', 'change-mode'), h('button', { cls: 'textlink', onclick: () => ctrl.leave() }, 'Leave')),
       note ? h('p', { cls: 'status-line', id: 'rematch-note' }, note) : '',
     );
   };

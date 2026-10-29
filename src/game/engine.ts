@@ -41,7 +41,9 @@ export interface Match {
   pending: Attack | null;
   /** My attacks and the answers they gave; replayed at reveal. */
   transcript: { attack: Attack; answer: Answer }[];
-  winner: Side | null;
+  /** Simultaneous salvo: this round's two halves, applied together once both are in. */
+  round: { me?: [Attack, Answer]; them?: [Attack, Answer] };
+  winner: Side | 'draw' | null;
   stats: Record<Side, Stats>;
   iStarted: boolean;
 }
@@ -61,11 +63,12 @@ export function createMatch(config: Config, fleet: Fleet, iStart: boolean): Matc
     energy: { me: 0, them: 0 },
     pending: null,
     transcript: [],
+    round: {},
     winner: null,
     stats: { me: newStats(), them: newStats() },
     iStarted: iStart,
   };
-  startTurn(m, iStart ? 'me' : 'them');
+  startTurn(m, iStart || m.config.turns > 1 ? 'me' : 'them');
   return m;
 }
 
@@ -79,16 +82,17 @@ export const untargeted = (m: Match, b: BoardView = m.target): Cell[] => Array.f
 function startTurn(m: Match, s: Side): void {
   m.phase = turnOf(s);
   m.stats[s].turns++;
-  if (m.config.mode === 2) m.energy[s] = Math.min(ENERGY_CAP, m.energy[s] + 1);
+  if (m.config.items) m.energy[s] = Math.min(ENERGY_CAP, m.energy[s] + 1);
 }
 
-/** Shots the side must fire this turn (Salvo: ships afloat, capped by untargeted cells). */
+/** Shots the side must fire this turn (Salvo: ships afloat, at most 5, capped by untargeted cells). */
 export const shotsAllowed = (m: Match, s: Side): number =>
-  m.config.mode === 1 ? Math.min(m.geo.fleet.length - sunkCount(attacked(m, s === 'me' ? 'them' : 'me')), m.geo.n ** 2 - attacked(m, s).shot.size) : 1;
+  m.config.turns ? Math.min(5, m.geo.fleet.length - sunkCount(attacked(m, s === 'me' ? 'them' : 'me')), m.geo.n ** 2 - attacked(m, s).shot.size) : 1;
 
 /** null when legal, else a reason. */
 export function legalAttack(m: Match, attack: Attack, s: Side): string | null {
-  if (m.phase !== turnOf(s)) return 'not their turn';
+  // Simultaneous: they may fire any time in the round, once; I fire while picking.
+  if (m.config.turns > 1 && s === 'them' ? m.phase === 'over' || m.round.them : m.phase !== turnOf(s)) return 'not their turn';
   const board = attacked(m, s);
   if (attack.k === 'fire') {
     const n = shotsAllowed(m, s);
@@ -99,7 +103,7 @@ export function legalAttack(m: Match, attack: Attack, s: Side): string | null {
     return new Set(cells).size < n || cells.some((c) => board.shot.has(c)) ? 'fired at the same cell twice' : null;
   }
   const def = ITEMS[attack.item]!;
-  return m.config.mode !== 2
+  return !m.config.items
     ? 'used an item outside Items mode'
     : !itemParamsValid(m.geo, attack.item, attack.a, attack.b)
       ? 'used an item with invalid inputs'
@@ -144,10 +148,29 @@ function apply(m: Match, s: Side, attack: Attack, answer: Answer): void {
     st.hits += answer.entries.filter((e) => e.code).length;
   }
   if (sunkCount(board) === g.fleet.length) {
-    m.winner = s;
+    // Simultaneous: both fleets can go down in the same round.
+    m.winner = m.winner ? 'draw' : s;
     m.phase = 'over';
-  } else if (m.config.extraShot && answer.k === 'cells' && answer.entries.some((e) => e.code)) m.phase = turnOf(s);
+  } else if (m.config.turns > 1) return;
+  else if (m.config.extraShot && answer.k === 'cells' && answer.entries.some((e) => e.code)) m.phase = turnOf(s);
   else startTurn(m, s === 'me' ? 'them' : 'me');
+}
+
+/** Simultaneous: once both halves of the round are in, apply them and start the next round. */
+function settle(m: Match): void {
+  const { me, them } = m.round;
+  if (!me || !them) return;
+  m.round = {};
+  apply(m, 'me', ...me);
+  apply(m, 'them', ...them);
+  if (m.phase !== 'over') startTurn(m, 'me');
+}
+
+/** Record or (simultaneous) hold a half round. */
+function half(m: Match, s: Side, attack: Attack, answer: Answer): void {
+  if (m.config.turns < 2) return apply(m, s, attack, answer);
+  m.round[s] = [attack, answer];
+  settle(m);
 }
 
 /** I attack. Throws if illegal (the UI prevents it). */
@@ -166,8 +189,10 @@ export function remoteAttack(m: Match, attack: Attack): { answer: Answer } | { c
   if (r) return { cheat: 'they ' + r };
   if (attack.k === 'item') m.energy.them -= ITEMS[attack.item]!.cost;
   const answer = resolveAttack(m.geo, m.fleet, m.own.shot, attack);
-  apply(m, 'them', attack, answer);
-  return { answer };
+  half(m, 'them', attack, answer);
+  // Simultaneous: this may have applied their answer to me as well.
+  const why = hidden(m);
+  return why ? { cheat: why } : { answer };
 }
 
 /** Live checks on an answer to my pending attack. null when plausible. */
@@ -213,11 +238,13 @@ export function applyAnswer(m: Match, answer: Answer): { ok: true } | { cheat: s
   const attack = m.pending!;
   m.pending = null;
   m.transcript.push({ attack, answer });
-  apply(m, 'me', attack, answer);
+  half(m, 'me', attack, answer);
+  const why = hidden(m);
+  return why ? { cheat: why } : { ok: true };
+}
+
+/** After their answers are applied: did they hide a sunk ship? */
+function hidden(m: Match): string | null {
   const b = m.target;
-  if (m.phase !== 'over') {
-    if (b.hit.size === m.geo.total) return { cheat: 'they hid a sunk ship' };
-    if (b.shot.size === m.geo.n ** 2) return { cheat: 'every cell was fired at but not every ship was sunk' };
-  }
-  return { ok: true };
+  return m.phase === 'over' ? null : b.hit.size === m.geo.total ? 'they hid a sunk ship' : b.shot.size === m.geo.n ** 2 ? 'every cell was fired at but not every ship was sunk' : null;
 }

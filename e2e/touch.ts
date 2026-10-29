@@ -1,5 +1,5 @@
 import { devices, expect, type Browser, type Page } from '@playwright/test';
-import { overflow, player, stubPlatform } from './util';
+import { overflow, pickMode, player, stubPlatform } from './util';
 
 /** Shared by the touch specs: a phone page, layout checks, and a game set up by taps alone. */
 export const phone = async (browser: Browser, name: string) => {
@@ -17,7 +17,7 @@ export async function connectByTouch(A: Page, B: Page, mode: 'Classic' | 'Items'
   expect(await fontSize(A, '#code')).toBeGreaterThanOrEqual(16);
   await A.locator('#create').tap();
   await expect(A.locator('#room-code')).toHaveText(/^\d{4}$/);
-  if (mode !== 'Classic') await A.getByRole('radio', { name: mode }).tap();
+  await pickMode(A, mode, true);
   // The escape hatch from matchmaking is a full-size tap target.
   expect((await A.locator('#use-direct').boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await A.locator('#use-direct').tap();

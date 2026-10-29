@@ -69,7 +69,7 @@ describe('engine: classic', () => {
 
 describe('engine: salvo', () => {
   it('shots = ships afloat; 5 -> 4 after a sink', () => {
-    const { A, B, play } = pair(cfg({ mode: 1 }));
+    const { A, B, play } = pair(cfg({ turns: 1 }));
     expect(shotsAllowed(A, 'me')).toBe(5);
     expect(legalAttack(A, fire(1, 2), 'me')).toMatch(/expected 5/);
     play(A, B, fire(90, 91, 92, 93, 94));
@@ -84,7 +84,7 @@ describe('engine: salvo', () => {
     expect(A.phase).toBe('theirTurn'); // salvo always passes
   });
   it('is capped by untargeted cells', () => {
-    const { A } = pair(cfg({ mode: 1 }));
+    const { A } = pair(cfg({ turns: 1 }));
     for (let c = 0; c < 97; c++) A.target.shot.add(c);
     expect(shotsAllowed(A, 'me')).toBe(3);
   });
@@ -93,7 +93,7 @@ describe('engine: salvo', () => {
 describe('engine: items', () => {
   const sonar = (a: number): Attack => ({ k: 'item', item: 0, a, b: 0 });
   it('energy +1 at the start of each own turn, capped at 6', () => {
-    const { A, B, play } = pair(cfg({ mode: 2 }));
+    const { A, B, play } = pair(cfg({ items: true }));
     expect(A.energy).toEqual({ me: 1, them: 0 });
     expect(B.energy).toEqual({ me: 0, them: 1 });
     let cell = 50;
@@ -106,7 +106,7 @@ describe('engine: items', () => {
     expect(B.energy.me).toBe(6);
   });
   it('items need enough energy and replace the shot', () => {
-    const { A, B, play } = pair(cfg({ mode: 2 }));
+    const { A, B, play } = pair(cfg({ items: true }));
     expect(legalAttack(A, sonar(11), 'me')).toMatch(/enough energy/);
     play(A, B, fire(50));
     play(B, A, fire(50));
@@ -121,19 +121,19 @@ describe('engine: items', () => {
   it('items are illegal outside Items mode and with bad inputs', () => {
     const { A } = pair(cfg());
     expect(legalAttack(A, sonar(11), 'me')).toMatch(/outside Items/);
-    const p = pair(cfg({ mode: 2 }));
+    const p = pair(cfg({ items: true }));
     p.A.energy.me = 6;
     expect(legalAttack(p.A, sonar(0), 'me')).toMatch(/invalid/);
     expect(legalAttack(p.A, { k: 'item', item: 3, a: 7, b: 0 }, 'me')).toMatch(/invalid/);
   });
   it('rejects an item whose footprint is all fired at', () => {
-    const { A } = pair(cfg({ mode: 2 }));
+    const { A } = pair(cfg({ items: true }));
     A.energy.me = 6;
     for (const c of [0, 1, 10]) A.target.shot.add(c);
     expect(legalAttack(A, { k: 'item', item: 2, a: 0, b: 0 }, 'me')).toMatch(/already/);
   });
   it('torpedo, cross and line resolve through the engine', () => {
-    const { A, B, play } = pair(cfg({ mode: 2 }));
+    const { A, B, play } = pair(cfg({ items: true }));
     A.energy.me = 6;
     B.energy.them = 6;
     const t = play(A, B, { k: 'item', item: 1, a: 9, b: 3 });
@@ -176,7 +176,7 @@ describe('engine: live answer checks', () => {
 
 describe('engine: area items on revealed cells', () => {
   it('a cross bomb centred on an already-hit cell strikes only the unrevealed arms', () => {
-    const { A, B, play } = pair(cfg({ mode: 2 }));
+    const { A, B, play } = pair(cfg({ items: true }));
     play(A, B, fire(17)); // FLEET_B battleship, column 7
     play(B, A, fire(99));
     A.energy.me = B.energy.them = 6;
@@ -185,7 +185,7 @@ describe('engine: area items on revealed cells', () => {
     expect(A.target.hit.has(7) && A.target.hit.has(27)).toBe(true);
   });
   it('airstrike resolves through the engine and costs 4', () => {
-    const { A, B, play } = pair(cfg({ mode: 2 }));
+    const { A, B, play } = pair(cfg({ items: true }));
     A.energy.me = B.energy.them = 4;
     const x = play(A, B, { k: 'item', item: 4, a: 33, b: 1 }); // 15 24 33 42 51
     expect(x.k === 'cells' && x.entries.map((e) => [e.cell, e.code])).toEqual([[15, 1], [24, 0], [33, 0], [42, 0], [51, 0]]);
@@ -195,7 +195,7 @@ describe('engine: area items on revealed cells', () => {
 
 describe('engine: extra shot in Items mode', () => {
   it('a hit by a shot or an item keeps the turn without new energy; sonar and misses pass', () => {
-    const { A, B, play } = pair(cfg({ mode: 2, extraShot: true }));
+    const { A, B, play } = pair(cfg({ items: true, extraShot: true }));
     expect(A.config.extraShot).toBe(true);
     play(A, B, fire(9)); // hit
     expect(A.phase).toBe('myTurn');
@@ -213,14 +213,14 @@ describe('engine: extra shot in Items mode', () => {
     expect(A.phase).toBe('theirTurn');
     expect(B.phase).toBe('myTurn');
   });
-  it('Salvo never has it', () => expect(createMatch(cfg({ mode: 1, extraShot: true }), FLEET_A, true).config.extraShot).toBe(false));
+  it('Salvo never has it', () => expect(createMatch(cfg({ turns: 1, extraShot: true }), FLEET_A, true).config.extraShot).toBe(false));
 });
 
 describe('engine: Russian', () => {
   // 1×4, 2×3, 3×2, 4×1 on rows 0, 2, 4, ... with gaps (no touching).
   const RU: Fleet = [0, 5, 20, 24, 28, 40, 43, 60, 62, 64].map((anchor) => ({ anchor, vertical: false }));
   it('hit shoots again; sunk ships and hit diagonals are marked as water', () => {
-    const { A, B, play } = pair(cfg({ mode: 3 }), RU, RU);
+    const { A, B, play } = pair(cfg({ russian: true }), RU, RU);
     expect([A.geo.fleet.length, A.geo.total, A.config.noTouch, A.config.extraShot]).toEqual([10, 20, true, true]);
     play(A, B, fire(60)); // 1-cell boat at A7: sunk
     expect(A.phase).toBe('myTurn');
@@ -233,11 +233,99 @@ describe('engine: Russian', () => {
     expect(A.phase).toBe('theirTurn');
   });
   it('the whole fleet must be sunk to win', () => {
-    const { A, B, play } = pair(cfg({ mode: 3 }), RU, RU);
+    const { A, B, play } = pair(cfg({ russian: true }), RU, RU);
     const cells = RU.flatMap((s, i) => Array.from({ length: A.geo.fleet[i]! }, (_, k) => s.anchor + k));
     for (const c of cells) play(A, B, fire(c));
     expect(A.winner).toBe('me');
     expect(A.stats.me.turns).toBe(1);
+  });
+  it('Russian + Salvo: 5 shots (10 ships, capped), no shooting again after a hit', () => {
+    const { A, B, play } = pair(cfg({ russian: true, turns: 1 }), RU, RU);
+    expect([A.config.extraShot, A.config.noTouch, A.geo.fleet.length]).toEqual([false, true, 10]);
+    expect(shotsAllowed(A, 'me')).toBe(5);
+    play(A, B, fire(60, 62, 64, 66, 0)); // three boats sunk, a hit on the battleship
+    expect(A.phase).toBe('theirTurn');
+    expect(shotsAllowed(B, 'me')).toBe(5); // 7 afloat, still capped
+    play(B, A, fire(99, 98, 97, 96, 95));
+    expect(A.phase).toBe('myTurn');
+  });
+});
+
+describe('engine: simultaneous salvo', () => {
+  const c = cfg({ turns: 2 });
+  const sim = (a: Fleet = FLEET_A, b: Fleet = FLEET_B, k = c) => [createMatch(k, a, true), createMatch(k, b, false)] as const;
+  const answer = (m: Match, atk: Attack) => {
+    const r = remoteAttack(m, atk);
+    if ('cheat' in r) throw new Error(r.cheat);
+    return r.answer;
+  };
+  const ok = (m: Match, a: ReturnType<typeof answer>) => expect(applyAnswer(m, a)).toEqual({ ok: true });
+
+  it('both pick at once; nothing applies until both halves are in', () => {
+    const [A, B] = sim();
+    expect([A.phase, B.phase]).toEqual(['myTurn', 'myTurn']);
+    const a = fire(9, 19, 29, 39, 49); // sinks B's carrier (column J)
+    const b = fire(90, 91, 92, 93, 94);
+    localAttack(A, a);
+    localAttack(B, b);
+    expect(A.phase).toBe('awaitingAnswer');
+    const toA = answer(B, a); // B answers A's salvo
+    expect(B.target.shot.size + B.own.shot.size).toBe(0); // held
+    expect(legalAttack(B, a, 'them')).toBe('not their turn'); // one salvo a round
+    ok(A, toA);
+    expect([A.phase, A.target.hit.size]).toEqual(['awaitingAnswer', 0]); // their salvo not in yet
+    const toB = answer(A, b);
+    // A has both halves: round applied, next round.
+    expect([A.phase, A.target.hit.size, A.own.shot.size]).toEqual(['myTurn', 5, 5]);
+    ok(B, toB);
+    expect([B.phase, B.own.hit.size, B.target.shot.size]).toEqual(['myTurn', 5, 5]);
+    // Shot counts come from ships afloat at round start: B lost one ship.
+    expect([shotsAllowed(A, 'me'), shotsAllowed(B, 'me')]).toEqual([5, 4]);
+    expect(A.stats.me.turns).toBe(2);
+  });
+
+  it('wire race: their salvo arrives while I pick, my answer crosses theirs', () => {
+    const [A, B] = sim();
+    const b = fire(90, 91, 92, 93, 94);
+    localAttack(B, b);
+    const toB = answer(A, b); // A still picking: answers at once, holds the half
+    expect([A.phase, A.own.shot.size, !!A.round.them]).toEqual(['myTurn', 0, true]);
+    const a = fire(9, 19, 29, 39, 49);
+    localAttack(A, a);
+    // Crossed on the wire: B gets my answer to its salvo before my salvo.
+    ok(B, toB);
+    expect(B.phase).toBe('awaitingAnswer');
+    const toA = answer(B, a);
+    expect(B.phase).toBe('myTurn');
+    ok(A, toA);
+    expect([A.phase, A.target.hit.size, A.own.hit.size]).toEqual(['myTurn', 5, 0]);
+  });
+
+  it('both fleets sunk in the same round is a draw on both sides', () => {
+    const k = cfg({ turns: 2, size: 0 }); // 8×8: 4332, 4 ships
+    const g = geoOf(k);
+    const f = (row: number): Fleet => g.fleet.map((_, i) => ({ anchor: (row + i * 2) * 8, vertical: false }));
+    const [A, B] = sim(f(0), f(0), k);
+    const cells = f(0).flatMap((s, i) => Array.from({ length: g.fleet[i]! }, (_, j) => s.anchor + j));
+    let rounds = 0;
+    for (let r = 0; A.phase !== 'over'; r++) {
+      const n = shotsAllowed(A, 'me');
+      const shots = cells.filter((x) => !A.target.shot.has(x)).slice(0, n);
+      localAttack(A, fire(...shots));
+      localAttack(B, fire(...shots));
+      ok(A, answer(B, fire(...shots)));
+      ok(B, answer(A, fire(...shots)));
+      rounds = r;
+    }
+    expect([A.winner, B.winner, B.phase]).toEqual(['draw', 'draw', 'over']);
+    expect(rounds).toBeGreaterThan(0);
+    expect(A.transcript.flatMap((t) => (t.attack as { cells: number[] }).cells).sort((a, b) => a - b)).toEqual(cells.sort((a, b) => a - b));
+  });
+
+  it('prefire and items are off', () => {
+    const [A] = sim(FLEET_A, FLEET_B, cfg({ turns: 2, items: true, extraShot: true }));
+    expect([A.config.items, A.config.extraShot]).toEqual([false, false]);
+    expect(legalAttack(A, { k: 'item', item: 0, a: 0, b: 0 }, 'me')).toMatch(/outside Items/);
   });
 });
 
@@ -256,7 +344,7 @@ describe('engine: Large board with islands', () => {
     expect(A.target.shot.has(143)).toBe(true);
   });
   it('Items: a torpedo from the right along row 4 stops at the island; a cross on an island hits the rest', () => {
-    const { A, B, play } = pair(cfg({ mode: 2, size: 2, seed: 4 }), LF, LF);
+    const { A, B, play } = pair(cfg({ items: true, size: 2, seed: 4 }), LF, LF);
     A.energy.me = 6;
     B.energy.them = 6;
     expect(play(A, B, { k: 'item', item: 1, a: 4, b: 1 })).toEqual({ k: 'cells', entries: [] });
@@ -267,7 +355,7 @@ describe('engine: Large board with islands', () => {
     expect(x.k === 'cells' && x.entries.map((e) => [e.cell, e.code])).toEqual([[1, 1], [14, 0], [12, 0]]);
   });
   it('Salvo shots follow the bigger fleet', () => {
-    const { A } = pair(cfg({ mode: 1, size: 3 }), randomFleet(geoOf(cfg({ size: 3 })), seededRng(1)), randomFleet(geoOf(cfg({ size: 3 })), seededRng(2)));
-    expect(shotsAllowed(A, 'me')).toBe(8);
+    const { A } = pair(cfg({ turns: 1, size: 3 }), randomFleet(geoOf(cfg({ size: 3 })), seededRng(1)), randomFleet(geoOf(cfg({ size: 3 })), seededRng(2)));
+    expect(shotsAllowed(A, 'me')).toBe(5); // 8 ships, capped at 5
   });
 });

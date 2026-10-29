@@ -43,11 +43,16 @@ export const stateKind = async (page: Page): Promise<string> => {
 };
 
 /** Host config is chosen in the lobby. */
-export async function hostLobby(A: Page, mode: 'Classic' | 'Salvo' | 'Items' | 'Russian' = 'Classic', extra: string[] = []): Promise<void> {
+export type Mode = 'Classic' | 'Salvo' | 'Simultaneous' | 'Items' | 'Russian';
+/** Classic: the defaults. Items is a switch, the rest are radios. */
+export const pickMode = (A: Page, mode: Mode, tap = false) =>
+  mode === 'Classic' ? null : (mode === 'Items' ? A.getByRole('switch', { name: 'Items' }) : A.getByRole('radio', { name: mode, exact: true }))[tap ? 'tap' : 'click']();
+
+export async function hostLobby(A: Page, mode: Mode = 'Classic', extra: string[] = []): Promise<void> {
   await A.goto('./');
   await A.click('#create');
   await expect(A.locator('#room-code')).toHaveText(/^\d{4}$/);
-  await A.getByRole('radio', { name: mode }).click();
+  await pickMode(A, mode);
   // Radios (e.g. a map size) by role; switches by their label text.
   for (const t of extra) {
     const radio = A.getByRole('radio', { name: t, exact: true });
@@ -56,7 +61,7 @@ export async function hostLobby(A: Page, mode: 'Classic' | 'Salvo' | 'Items' | '
 }
 
 /** Connect A (host) and B (guest) through the two-link direct fallback. */
-export async function connectDirect(A: Page, B: Page, mode: 'Classic' | 'Salvo' | 'Items' | 'Russian' = 'Classic', extra: string[] = [], gapMs = 0): Promise<void> {
+export async function connectDirect(A: Page, B: Page, mode: Mode = 'Classic', extra: string[] = [], gapMs = 0): Promise<void> {
   await hostLobby(A, mode, extra);
   await A.click('#use-direct');
   const offer = (await A.locator('#offer-link').textContent())!;
@@ -95,30 +100,36 @@ export async function waitTurn(A: Page, B: Page): Promise<Page | null> {
 
 export const targetCell = (p: Page, i: number) => p.locator(`.a-target .cell[data-i="${i}"]`);
 
-/** Play until the end: `winner` fires at the loser's ships, the loser fires at water. `tap`: touch taps, not clicks. */
-export async function playOut(A: Page, B: Page, winner: Page, mode: 'classic' | 'salvo' = 'classic', tap = false): Promise<void> {
+/**
+ * Play until the end: `winner` fires at the loser's ships, the loser fires at water. `tap`: touch taps, not clicks.
+ * `sim`: simultaneous salvo, both fire each round before either waits for the result.
+ */
+export async function playOut(A: Page, B: Page, winner: Page, mode: 'classic' | 'salvo' | 'sim' = 'classic', tap = false): Promise<void> {
   const lens: number[] = await A.evaluate(() => (window as unknown as { __bs: { ctrl: { geo: { fleet: number[] } } } }).__bs.ctrl.geo.fleet);
   const fleets = new Map<Page, number[]>([
     [A, fleetCells(await bs<Fleet>(A, 'myFleet'), lens)],
     [B, fleetCells(await bs<Fleet>(B, 'myFleet'), lens)],
   ]);
   for (let guard = 0; guard < 200; guard++) {
-    const p = await waitTurn(A, B);
-    if (!p) return;
-    const other = p === A ? B : A;
-    const shot: number[] = await p.evaluate(() => [...(window as unknown as { __bs: { state(): { match: { target: { shot: Set<number> } } } } }).__bs.state().match.target.shot]);
-    const ships = fleets.get(other)!.filter((c) => !shot.includes(c));
-    const water = Array.from({ length: 100 }, (_, i) => i).filter((c) => !shot.includes(c) && !fleets.get(other)!.includes(c));
-    const pool = p === winner ? [...ships, ...water] : [...water, ...ships];
-    if (mode === 'salvo') {
-      const n: number = await p.evaluate(() => {
-        const s = (window as unknown as { __bs: { state(): { match: { own: { sunk: unknown[] }; target: { shot: Set<number> } } } } }).__bs.state().match;
-        return Math.min(5 - s.own.sunk.filter(Boolean).length, 100 - s.target.shot.size);
-      });
-      for (const c of pool.slice(0, n)) await (tap ? targetCell(p, c).tap() : targetCell(p, c).click());
-      await (tap ? p.locator('#fire').tap() : p.click('#fire'));
-    } else await (tap ? targetCell(p, pool[0]!).tap() : targetCell(p, pool[0]!).click());
-    await expect.poll(() => p.evaluate(() => (window as unknown as { __bs: { state(): { match?: { phase: string } } } }).__bs.state().match?.phase)).not.toBe('awaitingAnswer');
+    const first = await waitTurn(A, B);
+    if (!first) return;
+    const ps = mode === 'sim' ? [A, B] : [first];
+    for (const p of ps) {
+      const other = p === A ? B : A;
+      const shot: number[] = await p.evaluate(() => [...(window as unknown as { __bs: { state(): { match: { target: { shot: Set<number> } } } } }).__bs.state().match.target.shot]);
+      const ships = fleets.get(other)!.filter((c) => !shot.includes(c));
+      const water = Array.from({ length: 100 }, (_, i) => i).filter((c) => !shot.includes(c) && !fleets.get(other)!.includes(c));
+      const pool = p === winner ? [...ships, ...water] : [...water, ...ships];
+      if (mode !== 'classic') {
+        const n: number = await p.evaluate(() => {
+          const s = (window as unknown as { __bs: { state(): { match: { own: { sunk: unknown[] }; target: { shot: Set<number> } } } } }).__bs.state().match;
+          return Math.min(5 - s.own.sunk.filter(Boolean).length, 100 - s.target.shot.size);
+        });
+        for (const c of pool.slice(0, n)) await (tap ? targetCell(p, c).tap() : targetCell(p, c).click());
+        await (tap ? p.locator('#fire').tap() : p.click('#fire'));
+      } else await (tap ? targetCell(p, pool[0]!).tap() : targetCell(p, pool[0]!).click());
+    }
+    for (const p of ps) await expect.poll(() => p.evaluate(() => (window as unknown as { __bs: { state(): { match?: { phase: string } } } }).__bs.state().match?.phase)).not.toBe('awaitingAnswer');
   }
 }
 

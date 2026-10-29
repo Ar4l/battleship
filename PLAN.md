@@ -207,7 +207,7 @@ Each frame is one message. Byte 0 is the opcode. The channel is reliable and ord
 | Op | Name | Layout | Bytes | Sender |
 |---|---|---|---|---|
 | 0x01 | HELLO | `01 ver=3 role(0 host,1 guest)` | 3 | both, on channel open |
-| 0x02 | CONFIG | `02 mode(0 classic,1 salvo,2 items,3 russian) flags(b0 extraShot, b1 noTouch) timerSec(0/15/30/60) size(0..3) seedHi seedLo` | 7 | host, after HELLO and in REMATCH |
+| 0x02 | CONFIG | `02 flags(b0 extraShot, b1 noTouch, b2 russian, b3 items, b4-5 turns 0 one shot/1 salvo/2 simultaneous) timerSec(0/15/30/60) size(0..3) seedHi seedLo` | 6 | host, after HELLO and in REMATCH |
 | 0x03 | READY | `03 boardCommit[32] coinCommit[32]` | 65 | both, on Ready |
 | 0x04 | COIN | `04 nonce[16]` | 17 | both, after having sent READY **and** received the peer's READY (game 1 only) |
 | 0x10 | FIRE | `10 c1 … cn` (n = 1, or in Salvo up to the fleet size, 8 at most) | 2–11 | attacker |
@@ -248,8 +248,8 @@ The full check happens at reveal.
 
 - When a player presses Ready:
   - Generate `salt = getRandomValues(16)` and `nonce = getRandomValues(16)`.
-  - Compute `boardCommit = SHA-256("bs3/board" ‖ salt ‖ config6 ‖ fleet)` and `coinCommit = SHA-256("bs1/coin" ‖ nonce)`.
-  - `config6` is the 6 CONFIG body bytes (mode, flags, timer, size, island seed). It binds the board to the rules, board size and islands in force.
+  - Compute `boardCommit = SHA-256("bs4/board" ‖ salt ‖ config ‖ fleet)` and `coinCommit = SHA-256("bs1/coin" ‖ nonce)`.
+  - `config` is the 5 CONFIG body bytes (flags, timer, size, island seed). It binds the board to the full rules, board size and islands in force.
   - Send READY. The local fleet then locks and cannot be changed.
 - **Coin (game 1):** after both READYs, each side sends COIN. The receiver checks `SHA-256("bs1/coin" ‖ nonce) == coinCommit`, and a mismatch means `notice('invalid-move')`. The starter is chosen by `(nonceHost[0] ^ nonceGuest[0]) & 1`: 0 means the host starts. Show the result for 1.2 s ("You go first" / "They go first") as a strip message, then the battle begins.
 - **Rematch:** new salt and new commit. The coin step is skipped, and the player who did not start the previous game starts.
@@ -280,10 +280,17 @@ Ships are straight, horizontal or vertical. Board size and fleet follow §7.1; C
 - With **Extra shot after a hit** on (Classic and Items, default off), a hit or sunk gives the same player another turn. The turn timer then restarts.
 - A miss passes the turn.
 
+**Settings (protocol 4).** Fleet (Standard / Russian), Turns (One shot / Salvo / Simultaneous salvo) and Items are independent; `normConfig` in `rules.ts` is the one place that fills in what they imply. Russian forces 10×10 and no touching, and "hit shoots again" with one-shot turns only. Items and Extra shot need one-shot turns.
+
 **Salvo.**
-- Shots this turn = `min(your ships afloat, untargeted cells)`, so 5 at the start, minus one per ship of yours that has been sunk.
+- Shots this turn = `min(5, your ships afloat, untargeted cells)`. Russian (10 ships) starts at 5 too.
 - The attacker selects that many distinct untargeted cells and presses "Fire 3/3". Enter also fires once the selection is full, and tapping a selected cell deselects it.
 - All the shots resolve in one ANSWER, and the turn always passes. Extra shot is disabled in this mode.
+
+**Simultaneous salvo.**
+- Every round both players pick their shots (counts from ships afloat at the round start) and send FIRE when ready. Each side answers the other's FIRE as soon as it arrives, but holds both halves until it has its own answer too; then both apply and the next round starts. The channel is ordered, so a FIRE for the next round can't overtake the answer that ends this one.
+- If both fleets sink in the same round the game is a draw; reveal and verification run as usual.
+- The turn timer sends the current pick, filled up at random. No prefire.
 
 **Items.**
 - Shots are as in Classic. With Extra shot on, any hit (a shot, a torpedo or an area item; never sonar) gives another turn, which does not add energy.
@@ -523,12 +530,12 @@ applyAnswer(m, answer): { m, events: UiEvent[] } | { cheat: string }
 | Asset | Budget (gzip -9) | Measured |
 |---|---|---|
 | `index.html` with inlined CSS | ≤ 6.0 KB | 5.9 KB |
-| app JS (entry chunk: game + proto + ui + room) | ≤ 23.2 KB | 23.1 KB |
+| app JS (entry chunk: game + proto + ui + room) | ≤ 23.6 KB | 23.5 KB |
 | Trystero chunk (lazy, trimmed) | ≤ 15.4 KB | 15.0 KB |
 | direct-link chunks (lazy: SDP packing, fallback flows and screens) | ≤ 4.5 KB | 4.0 KB |
-| **Code game total (html + entry + Trystero)** | **≤ 44 KB hard** | **43.9 KB** |
+| **Code game total (html + entry + Trystero)** | **≤ 44.5 KB hard** | **44.4 KB** |
 
-Measured values are approximate (rounded, as of round 4); `npm run size` prints exact ones. Only the total is hard (40 KB until round 4, which raised it to 44 KB for board sizes, islands, Russian mode, Airstrike, prefire and the one-screen mobile battle); the per-file rows are guard rails with some slack so a small CSS change doesn't fail a deploy while the total still fits. The mobile round moved 0.5 KB of rail from Trystero to the entry: it trimmed Trystero's unused stream and track bookkeeping (0.3 KB) to pay for the wake lock, the background ping and the iOS audio unlock. Mobile round 2 moved another 0.4 KB the same way: Trystero's per-peer track plumbing and public media methods went (0.3 KB) to pay for the relay re-check, the wake-lock idle cap and the in-app browser hint.
+Measured values are approximate (rounded, as of round 5); `npm run size` prints exact ones. Only the total is hard (40 KB until round 4, which raised it to 44 KB for board sizes, islands, Russian mode, Airstrike, prefire and the one-screen mobile battle; round 5 raised it to 44.5 KB for the independent rule settings and simultaneous salvo, about 0.5 KB before trimming and 0.42 KB after); the per-file rows are guard rails with some slack so a small CSS change doesn't fail a deploy while the total still fits. The mobile round moved 0.5 KB of rail from Trystero to the entry: it trimmed Trystero's unused stream and track bookkeeping (0.3 KB) to pay for the wake lock, the background ping and the iOS audio unlock. Mobile round 2 moved another 0.4 KB the same way: Trystero's per-peer track plumbing and public media methods went (0.3 KB) to pay for the relay re-check, the wake-lock idle cap and the in-app browser hint.
 
 - The first plan (9 KB entry, 37 KB target) underestimated the UI and anti-cheat code. Instead of raising the budget, the Trystero chunk was trimmed from 22.0 KB to 15.6 KB (`build/trystero/`: no media, no public actions, a one-frame JSON wire for internal messages, no room-password challenge), Vite's preload helper was replaced by a pass-through, the CSS was merged and deduplicated, and the game, protocol and UI modules were rewritten more compactly.
 - No fonts, images or audio files. The favicon is an inline SVG data URI.
