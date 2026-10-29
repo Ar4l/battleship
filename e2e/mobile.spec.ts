@@ -1,6 +1,6 @@
-import { expect, test, type Page } from '@playwright/test';
+import { chromium, devices, expect, test, type Page } from '@playwright/test';
 import { connectByTouch, fits, phone, readyByTouch } from './touch';
-import { bs, fleetCells, playOut, setHidden, targetCell, waitTurn, type Fleet } from './util';
+import { bs, fleetCells, frozen, playOut, player, setHidden, stubPlatform, targetCell, waitTurn, type Fleet } from './util';
 
 // Phones in Chromium's mobile emulation (isMobile + hasTouch), driven by touch taps only.
 // e2e/webkit.spec.ts covers the Safari engine.
@@ -16,16 +16,19 @@ async function aOnTurnWithEnergy(A: Page, B: Page): Promise<void> {
   await A.evaluate(() => (window as any).__bs.ctrl.emit());
 }
 
-/** One-finger drag through CDP touch events (Chromium). */
-async function touchDrag(p: Page, from: { x: number; y: number }, to: { x: number; y: number }): Promise<void> {
+/** One-finger drag through CDP touch events (Chromium); `to` omitted: a press held for `holdMs`. */
+async function touchDrag(p: Page, from: { x: number; y: number }, to?: { x: number; y: number }, holdMs = 0): Promise<void> {
   const cdp = await p.context().newCDPSession(p);
   const at = (x: number, y: number) => [{ x, y, id: 1 }];
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: at(from.x, from.y) });
-  for (let i = 1; i <= 8; i++)
+  if (holdMs) await p.waitForTimeout(holdMs);
+  for (let i = 1; to && i <= 8; i++)
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: at(from.x + ((to.x - from.x) * i) / 8, from.y + ((to.y - from.y) * i) / 8) });
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await cdp.detach();
 }
+
+const LONG = "Time's up. You sank their Carrier and Cruiser";
 
 const center = async (p: Page, sel: string) => {
   const b = (await p.locator(sel).boundingBox())!;
@@ -52,9 +55,10 @@ test('phones: an Items game by touch alone (iPhone 13 hosts, Pixel 7 joins)', as
   const fleet = await bs<Fleet>(A, 'myFleet');
   const shipCell = fleet[4]!.anchor;
   const water = [...Array(100).keys()].find((c) => !fleetCells(fleet).includes(c))!;
-  // touch-action is not inherited: the grid sets it for water, ship cells override it.
+  // No double-tap zoom anywhere (set on the root, it applies to all of the page); ship
+  // cells also stop panning so a drag moves the ship.
   const ta = (sel: string) => A.locator(sel).evaluate((e) => getComputedStyle(e).touchAction);
-  expect(await ta('.placing .cells')).toBe('manipulation');
+  expect(await ta('html')).toBe('manipulation');
   expect(await ta(`.placing .cell[data-i="${shipCell}"]`)).toBe('none');
   expect(await ta(`.placing .cell[data-i="${water}"]`)).toBe('auto');
   await fits(A, 'placement');
@@ -70,6 +74,13 @@ test('phones: an Items game by touch alone (iPhone 13 hosts, Pixel 7 joins)', as
   await touchDrag(A, await center(A, '.placing .cell[data-i="80"]'), await center(A, '.placing .cell[data-i="87"]'));
   expect((await bs<{ anchor: number }[]>(A, 'myFleet'))[4]!.anchor).toBe(87);
   expect(await A.evaluate(() => scrollY)).toBe(y0);
+  // A press held in place (picking the ship up, then letting go) does not rotate it; a tap does.
+  await A.waitForTimeout(300);
+  await touchDrag(A, await center(A, '.placing .cell[data-i="87"]'), undefined, 800);
+  expect((await bs<{ vertical: boolean }[]>(A, 'myFleet'))[4]!.vertical).toBe(false);
+  await A.waitForTimeout(300);
+  await A.locator('.placing .cell[data-i="87"]').tap();
+  expect((await bs<{ vertical: boolean }[]>(A, 'myFleet'))[4]!.vertical).toBe(true);
   // Chrome swallows a tap that lands right after a fast synthetic drag (seen as a fling).
   await A.waitForTimeout(1000);
   await A.locator('#ready').tap();
@@ -80,33 +91,54 @@ test('phones: an Items game by touch alone (iPhone 13 hosts, Pixel 7 joins)', as
 
   // Torpedo: the armed hint still says which way it runs, and Direction changes it.
   await aOnTurnWithEnergy(A, B);
+  // Picking an item shows no footprint until the board is tapped.
+  await A.getByRole('button', { name: /^Cross bomb/ }).tap();
+  await expect(A.locator('.a-target .cell.pv')).toHaveCount(0);
   await A.getByRole('button', { name: /^Torpedo/ }).tap();
+  await expect(A.locator('.a-target .cell.pv')).toHaveCount(0);
   await targetCell(A, 45).tap();
+  await expect(A.locator('.a-target .cell.pv')).toHaveCount(10);
   const hint = A.locator('.item-hint > span');
   await expect(hint).toContainText('Tap again to fire, from left.');
+  // The hint row can be below the fold on a phone: the strip says it too.
+  await expect(A.locator('.strip-sub')).toHaveText('Tap again to fire, from left');
   await A.locator('#item-dir').tap();
   await expect(hint).toContainText('Tap again to fire, from right.');
+  await expect(A.locator('.strip-sub')).toHaveText('Tap again to fire, from right');
   expect(await A.evaluate(() => (window as any).__bs.state().match.phase)).toBe('myTurn');
   await targetCell(A, 45).tap();
   await expect.poll(() => A.evaluate(() => (window as any).__bs.state().match.phase)).toBe('theirTurn');
 
   // Long results wrap instead of being cut off, and nothing scrolls sideways.
   for (const p of [A, B]) {
-    await p.evaluate(() => {
+    await p.evaluate((t) => {
       const c = (window as any).__bs.ctrl;
-      c.lastResult = 'You sank their Carrier. You sank their Cruiser';
+      c.lastResult = t;
       c.emit();
-    });
+    }, LONG);
     expect(await p.locator('.strip-sub').evaluate((e) => e.scrollWidth <= e.clientWidth && e.getBoundingClientRect().right <= innerWidth)).toBe(true);
     await fits(p, 'battle with a long result');
   }
 
-  // A dropped link says so instead of showing a silent board.
-  await expect(A.locator('#lost')).toBeHidden();
-  await A.evaluate(() => (window as any).__bs.ctrl.t.onstate(false));
-  await expect(A.locator('#lost')).toBeVisible();
-  await A.evaluate(() => (window as any).__bs.ctrl.t.onstate(true));
-  await expect(A.locator('#lost')).toBeHidden();
+  // A dropped link says so instead of showing a silent board, without moving the board
+  // under a finger: the notice takes the brand's place in the header, on one line.
+  for (const width of [390, 360]) {
+    await A.setViewportSize({ width, height: 664 });
+    await expect(A.locator('#lost')).toBeHidden();
+    const board = await A.locator('.a-target').boundingBox();
+    const strip = await A.locator('#strip').boundingBox();
+    await A.evaluate(() => (window as any).__bs.ctrl.t.onstate(false));
+    await expect(A.locator('#lost')).toBeVisible();
+    await expect(A.locator('#lost')).toHaveText('Connection lost. Waiting…');
+    expect((await A.locator('#lost').boundingBox())!.height).toBeLessThanOrEqual(24);
+    expect(await A.locator('.a-target').boundingBox()).toEqual(board);
+    expect(await A.locator('#strip').boundingBox()).toEqual(strip);
+    await expect(A.locator('#leave')).toBeVisible();
+    await fits(A, `battle, link lost, ${width} px`);
+    await A.evaluate(() => (window as any).__bs.ctrl.t.onstate(true));
+    await expect(A.locator('#lost')).toBeHidden();
+  }
+  await A.setViewportSize(devices['iPhone 13'].viewport);
 
   await playOut(A, B, A, 'classic', true);
   await expect(A.locator('#verdict')).toHaveText('Fleet verified');
@@ -132,11 +164,11 @@ test('landscape phones: placement and battle fit without sideways scrolling', as
   await readyByTouch(A, B);
   await aOnTurnWithEnergy(A, B);
   for (const p of [A, B]) {
-    await p.evaluate(() => {
+    await p.evaluate((t) => {
       const c = (window as any).__bs.ctrl;
-      c.lastResult = 'You sank their Carrier. You sank their Cruiser';
+      c.lastResult = t;
       c.emit();
-    });
+    }, LONG);
     await fits(p, 'battle');
     expect(await p.evaluate(() => innerHeight)).toBe(p.viewportSize()!.height);
   }
@@ -162,7 +194,7 @@ test('back from a long app switch with a dead link: an honest notice, not a forf
   await setHidden(A, true);
   await A.waitForTimeout(10_200);
   await setHidden(A, false);
-  await expect(A.locator('#notice')).toContainText('Connection lost while Battleship was in the background', { timeout: 6000 });
+  await expect(A.locator('#notice')).toContainText('Connection lost while Battleship was in the background', { timeout: 10000 });
   await expect(A.locator('#notice')).not.toContainText('forfeit');
   // Here the link was still up, so B hears the close: for B the opponent left.
   await expect(B.locator('#notice')).toContainText('Your opponent left');
@@ -183,4 +215,89 @@ test('home code field: pasted codes with spaces or a label still work, Backspace
   await A.locator('#code').tap({ position: { x: 10, y: 28 } });
   // The caret goes to the end even when an earlier box is tapped.
   expect(await A.locator('#code').evaluate((e: HTMLInputElement) => e.selectionStart)).toBe(3);
+});
+
+test('an opponent frozen for 20 s (iOS suspends the page) keeps the game; a shot fired meanwhile lands when they return', async ({ browser }) => {
+  test.skip(process.platform !== 'linux', 'freezes a browser with SIGSTOP');
+  test.setTimeout(120_000);
+  // B runs in its own browser so its processes can be stopped without touching A.
+  const server = await chromium.launchServer({ args: ['--disable-features=WebRtcHideLocalIpsWithMdns'] });
+  try {
+    const A = await phone(browser, 'Pixel 7');
+    const B = await phone(await chromium.connect(server.wsEndpoint()), 'iPhone 13');
+    await connectByTouch(A, B);
+    await readyByTouch(A, B);
+    if ((await waitTurn(A, B)) === B) {
+      await targetCell(B, 99).tap();
+      await waitTurn(A, B);
+    }
+    const board = await A.locator('.a-target').boundingBox();
+    await setHidden(B, true);
+    // Chromium reports 'disconnected' after about 5 s and 'failed' at about 16 s;
+    // the game used to end at 'failed'.
+    await frozen(server, async () => {
+      await expect(A.locator('#lost')).toBeVisible({ timeout: 12000 });
+      expect(await A.locator('.a-target').boundingBox()).toEqual(board);
+      await targetCell(A, 0).tap();
+      await A.waitForTimeout(20_000 - 6000);
+      await expect(A.locator('.battle')).toBeVisible({ timeout: 100 });
+      expect(await A.evaluate(() => (window as any).__bs.state().match.phase)).toBe('awaitingAnswer');
+    });
+    await setHidden(B, false);
+    // The shot is delivered and answered, the link is back, and B (away 20 s) gets its ping answered.
+    await expect.poll(() => A.evaluate(() => (window as any).__bs.state().match.phase), { timeout: 10000 }).toBe('theirTurn');
+    await expect(A.locator('#lost')).toBeHidden();
+    await B.waitForTimeout(7000);
+    await expect(B.locator('.battle')).toBeVisible();
+    await targetCell(B, 98).tap();
+    await expect.poll(() => A.evaluate(() => (window as any).__bs.state().match.phase)).toBe('myTurn');
+  } finally {
+    await server.close();
+  }
+});
+
+test('host lobby: "can\'t reach the matchmaking network" clears once a tracker is back', async ({ browser }) => {
+  const A = await phone(browser, 'Pixel 7');
+  // Fake trackers: first every socket dies at once, then they stay open (and silent).
+  let up = false;
+  await A.routeWebSocket(/^wss:/, (ws) => void (up || ws.close()));
+  await A.goto('./');
+  await A.locator('#create').tap();
+  await expect(A.locator('main')).toContainText("Can't reach the matchmaking network", { timeout: 10000 });
+  up = true;
+  await expect(A.locator('main')).not.toContainText("Can't reach the matchmaking network", { timeout: 30000 });
+  await expect(A.locator('#use-direct')).toHaveText('Use a direct link');
+});
+
+test('stale screens: a new game link still joins; in-app browsers get a hint; the screen sleeps after 5 idle minutes', async ({ browser }) => {
+  const A = await phone(browser, 'Pixel 7');
+  await A.routeWebSocket(/^wss:/, () => {});
+  await A.clock.install();
+  // A tab left on a notice (Android reuses it for the next link from the same app).
+  await A.goto('./#o=nonsense');
+  await expect(A.locator('#notice')).toBeVisible();
+  await A.evaluate(() => (location.hash = '#5678'));
+  await expect(A.locator('main')).toContainText('Joining game 5678');
+  await A.locator('main').getByRole('button', { name: 'Cancel' }).tap();
+  await A.evaluate(() => ((window as any).__wl.length = 0));
+
+  await A.locator('#create').tap();
+  await expect(A.locator('#room-code')).toHaveText(/^\d{4}$/);
+  await expect(A.locator('#in-app')).toHaveCount(0);
+  expect(await A.evaluate(() => (window as any).__wl)).toEqual(['request']);
+  // A host whose friend never shows up: the screen may sleep after 5 minutes, and a tap wakes it.
+  await A.clock.fastForward('04:50');
+  expect(await A.evaluate(() => (window as any).__wl)).toEqual(['request']);
+  await A.clock.fastForward('00:20');
+  await expect.poll(() => A.evaluate(() => (window as any).__wl)).toEqual(['request', 'release']);
+  await A.locator('#room-code').tap();
+  await expect.poll(() => A.evaluate(() => (window as any).__wl)).toEqual(['request', 'release', 'request']);
+
+  // Instagram's in-app browser closes the page when its user goes back to the chat.
+  const ig = await player(browser, { ...devices['iPhone 13'], userAgent: devices['iPhone 13'].userAgent + ' Instagram 300.0.0.0' });
+  await stubPlatform(ig);
+  await ig.routeWebSocket(/^wss:/, () => {});
+  await ig.goto('./');
+  await ig.locator('#create').tap();
+  await expect(ig.locator('#in-app')).toContainText('Open this page in Safari or Chrome');
 });

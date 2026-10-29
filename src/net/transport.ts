@@ -47,6 +47,9 @@ function pipe(sendRaw: (u8: Uint8Array) => void, closeRaw: () => void): Pipe {
   return t;
 }
 
+/** How long a dropped link may stay down before the game ends (ms). */
+export const GRACE = 90000;
+
 /** Resolve with a Transport once the channel opens. */
 export function fromChannel(dc: RTCDataChannel, pc: RTCPeerConnection, onClose?: () => void): Promise<Transport> {
   const t = pipe(
@@ -71,15 +74,19 @@ export function fromChannel(dc: RTCDataChannel, pc: RTCPeerConnection, onClose?:
   let disc = 0;
   pc.addEventListener('connectionstatechange', () => {
     const s = pc.connectionState;
-    clearTimeout(disc);
-    // Before the channel opens, 'failed' is not final: ICE recovers when a suspended
-    // peer (a phone in another app) comes back. net/direct.ts bounds that wait.
-    if ((s === 'failed' && dc.readyState === 'open') || s === 'closed') t.end(s);
-    // Generous: a phone that briefly switches to a messenger drops consent checks.
-    else if (s === 'disconnected') {
+    if (s === 'closed') t.end(s);
+    else if (s === 'connected') {
+      clearTimeout(disc);
+      disc = 0;
+      t.onstate?.(true);
+    }
+    // Neither 'disconnected' nor 'failed' is final: ICE recovers when a suspended peer
+    // (a phone in another app) comes back. Before the channel opens, net/direct.ts bounds
+    // that wait; after, a generous grace covers a minute or so in a messenger.
+    else if (s === 'disconnected' || (s === 'failed' && dc.readyState === 'open')) {
       t.onstate?.(false);
-      disc = window.setTimeout(() => t.end(s), 20000);
-    } else if (s === 'connected') t.onstate?.(true);
+      disc ||= window.setTimeout(() => t.end(s), GRACE);
+    }
   });
   return new Promise((res) => (dc.readyState === 'open' ? res(t) : (dc.onopen = () => res(t))));
 }

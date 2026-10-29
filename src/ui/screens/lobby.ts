@@ -1,6 +1,6 @@
 import type { Controller } from '../../app/controller';
 import { h } from '../h';
-import { btn, copyBtn, gameUrl, label, linkBox, prettyUrl, settings, shareBtn, status, type Screen } from '../kit';
+import { btn, copyBtn, gameUrl, inApp, label, linkBox, prettyUrl, settings, shareBtn, status, type Screen } from '../kit';
 
 export function lobbyHost(ctrl: Controller): Screen {
   const code = h('div', { cls: 'room-code mono', id: 'room-code' });
@@ -19,6 +19,7 @@ export function lobbyHost(ctrl: Controller): Screen {
       link,
       h('div', 'row-btns', copyBtn(url, 'Copy link', 'copy-link'), shareBtn(url)),
       status('Waiting for your friend…'),
+      inApp('code'),
       net,
     ),
     h('div', 'lobby-settings', h('h2', 'h3', 'Rules'), settings(ctrl.config, (p) => ctrl.setConfig(p))),
@@ -50,7 +51,7 @@ export function lobbyGuest(ctrl: Controller): Screen {
       ...(s.slow
         ? [
             status('Still looking for the host'),
-            h('p', null, 'If your friend switched apps to send the link, the game starts when they come back. Still nothing? Check the code, or ask for a direct link.'),
+            h('p', null, 'This can take a while on a slow network, or if your friend switched apps to send the code: the game starts when they come back. Still nothing? Check the code, or ask for a direct link.'),
             btn('Back', () => ctrl.leave()),
           ]
         : [status('Looking for the host'), btn('Cancel', () => ctrl.leave(), 'quiet')]),

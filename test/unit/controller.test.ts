@@ -284,7 +284,7 @@ describe('controller over an in-memory transport', () => {
         tr(G).send = (u) => (sent.push(decode(u)!.t), send(u));
         await away(G, 12_000);
         expect(sent).toEqual(['ping']);
-        vi.advanceTimersByTime(3_000);
+        vi.advanceTimersByTime(6_500);
         expect(G.state.s).toBe('battle');
         expect(H.state.s).toBe('battle');
       } finally {
@@ -314,7 +314,10 @@ describe('controller over an in-memory transport', () => {
         await placeAndStart(H, G);
         tr(H).send = () => {};
         await away(G, 15_000);
-        vi.advanceTimersByTime(3_000);
+        // ICE may take a few seconds to recover (cellular): the ping gets 6 s.
+        vi.advanceTimersByTime(5_500);
+        expect(G.state.s).toBe('battle');
+        vi.advanceTimersByTime(600);
         expect(G.state).toMatchObject({ s: 'notice', kind: 'away' });
         await until(() => H.state.s === 'notice');
         expect(H.state).toMatchObject({ s: 'notice', kind: 'left', detail: 'battle' });

@@ -22,8 +22,8 @@ export interface RoomEvents {
   full(): void;
   /** ICE failed after signalling. */
   failed(): void;
-  /** Host: no relay reachable after 6 s. */
-  relaysDown(): void;
+  /** Host: no relay reachable after 6 s (true), or one is back (false). */
+  relaysDown(down: boolean): void;
   /** Guest: no host found after 10 s. */
   slow(): void;
   /** Host: code re-rolled after a collision. */
@@ -64,7 +64,9 @@ export function openRoom(role: 'host' | 'guest', code: number, ev: RoomEvents): 
     if (left) return;
     T.resumeRelayReconnection();
     const r = (room = T.joinRoom(
-      { appId: APP_ID, relayConfig: { urls: TRACKERS, warnOnRelayFailure: false }, rtcConfig: { iceServers: STUN } },
+      // manualReconnection: Trystero would reopen every tracker socket on each 'online' event,
+      // also mid-game, and announce for the rest of it. The lobby does that itself (below).
+      { appId: APP_ID, relayConfig: { urls: TRACKERS, warnOnRelayFailure: false, manualReconnection: true }, rtcConfig: { iceServers: STUN } },
       'r' + c,
       {
         handshakeTimeoutMs: 10000,
@@ -146,19 +148,29 @@ export function openRoom(role: 'host' | 'guest', code: number, ev: RoomEvents): 
 
   join(code).catch(() => ev.failed());
 
-  const timer = setTimeout(
-    async () => {
-      if (left || opponent || hostId) return;
-      if (!host) return ev.slow();
-      if (!sockets(await prefetch()).some((s) => s.readyState === 1)) ev.relaysDown();
-    },
-    host ? 6000 : 10000,
-  );
+  // Until connected: hold tracker reconnects while offline, retry at once when back online.
+  const net = (e: Event) => left || transport || void prefetch().then((T) => (e.type == 'offline' ? T.pauseRelayReconnection() : T.resumeRelayReconnection()));
+  addEventListener('online', net);
+  addEventListener('offline', net);
+
+  // The host re-checks while the relays look down, and clears the warning once one is back
+  // (sockets that died while the phone was in another app reconnect a moment after it returns).
+  let down = false;
+  const check = async () => {
+    if (left || opponent || hostId) return;
+    if (!host) return ev.slow();
+    const d = !sockets(await prefetch()).some((s) => s.readyState === 1);
+    if (d !== down) ev.relaysDown((down = d));
+    if (d) timer = setTimeout(check, 2000);
+  };
+  let timer = setTimeout(check, host ? 6000 : 10000);
 
   return {
     leave() {
       left = true;
       clearTimeout(timer);
+      removeEventListener('online', net);
+      removeEventListener('offline', net);
       transport?.close();
       leaveRoom();
     },

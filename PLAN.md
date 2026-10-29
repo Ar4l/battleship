@@ -156,12 +156,13 @@ room = joinRoom({ appId: 'aral.cc-battleship',
 - Once the channel opens, call `pauseRelayReconnection()` and close the tracker sockets: all of them on the guest, all but one open socket on the host (so a third player still hears "room full"). `openRoom` calls `resumeRelayReconnection()` before joining.
 - A peer that fails its handshake or leaves before the channel opens clears `reserved`/`opponent`, so the room unlocks for the next guest.
 - **Timeouts:**
-  - Host after 6 s: if `getRelaySockets()` reports no socket in `readyState === 1`, set `net:'relays-down'` and show the direct-link panel prominently ("Can't reach the matchmaking network. Use a direct link instead."). Otherwise, wait for the friend indefinitely. A link reading "Trouble connecting? Use a direct link" is always visible.
+  - Host after 6 s: if `getRelaySockets()` reports no socket in `readyState === 1`, set `net:'relays-down'` and show the direct-link panel prominently ("Can't reach the matchmaking network. Use a direct link instead."). While it shows, re-check every 2 s and clear it once a socket is open again (sockets that died while the phone was in another app reconnect a moment after it returns). Otherwise, wait for the friend indefinitely. A link reading "Trouble connecting? Use a direct link" is always visible.
   - Guest after 10 s with no host handshake: set `slow:true`. The guest sees "Still looking for the host" and that a friend who switched apps to send the link starts the game when they come back, with a Back button. There is no Retry: the search keeps running, and restarting it would only throw away an attempt in progress (on a slow network the handshake alone can take 10–30 s).
   - `onJoinError` after SDP was exchanged means ICE failed. The fallback uses the same STUN servers and would fail the same way, so the guest goes straight to `notice('failed')`. The host can't tell its friend from a stray peer at that point (ICE fails before the handshake), so it forgets the peer and stays in the lobby, where the direct link is one tap away. If the error is a handshake timeout, go back to waiting.
-  - After the channel opens, if `pc.connectionState === 'failed'`, or it stays `'disconnected'` for more than 20 s (long enough for a quick switch to a messenger app), go to `notice('left')` ("Your opponent left or lost connection."). Trystero's own 5 s close after `'disconnected'` is patched to 25 s at build time (`vite.config.ts`), so our 20 s rule decides. In practice Chromium moves a silent peer to `'failed'` about 16 s after it stops answering (about 10 s after `'disconnected'`), so a peer frozen for up to about 15 s keeps the game on both paths; longer would need an ICE restart, which has no signalling channel left. While the connection is `'disconnected'` both screens show "Connection lost. Waiting for your opponent…" above the game.
-  - Phones suspend a page in the background. `main.ts` reports `visibilitychange` to the controller. Back after 10 s or more in placement or battle, it sends PING; with no frame within 3 s it sends BYE and shows "Connection lost while Battleship was in the background" (no forfeit claim). A link that dies while this page is hidden, or within 30 s of coming back, gets the same notice instead of "You win by forfeit". A BYE always reads as the opponent leaving.
-  - A screen wake lock is held from the lobby to the end screen (released on home, notices, once the opponent has left, and whenever the page is hidden; taken again on return), so a phone doesn't auto-lock during the opponent's turn.
+  - After the channel opens, `'disconnected'` and `'failed'` are both treated as "down, may come back": Chromium moves a silent peer to `'failed'` about 16 s after it stops answering, but ICE recovers on its own within half a second of the peer returning (no ICE restart needed), and SCTP delivers what was sent meanwhile. Only `'closed'`, a closed channel, or 90 s down without recovery (`GRACE`, counted from the first drop) go to `notice('left')` ("Your opponent left or lost connection."). Trystero's own closes (at once on `'failed'`, 5 s after `'disconnected'`) are patched at build time (`vite.config.ts`) to `'closed'` only and 100 s, so our rule decides. While the link is down both screens show "Connection lost. Waiting…" in the header row in place of the brand, so nothing below moves under a finger.
+  - Phones suspend a page in the background. `main.ts` reports `visibilitychange` to the controller. Back after 10 s or more in placement or battle, it sends PING; with no frame within 6 s (ICE can take a few seconds to recover on cellular) it sends BYE and shows "Connection lost while Battleship was in the background" (no forfeit claim). A link that dies while this page is hidden, or within 30 s of coming back, gets the same notice instead of "You win by forfeit". A BYE always reads as the opponent leaving.
+  - A screen wake lock is held from the lobby to the end screen (released on home, notices, once the opponent has left, and whenever the page is hidden; taken again on return), so a phone doesn't auto-lock during the opponent's turn. Outside placement and battle it is released after 5 minutes with no tap and no game event, and taken again on the next tap. A lock the system drops or refuses is requested again on the next event.
+  - Trystero's `online`/`offline` handler is off (`relayConfig.manualReconnection`): it would reopen every tracker socket mid-game. `openRoom` pauses and resumes reconnects on those events itself until the channel opens.
 
 ### 4.2 Direct-link fallback (`net/direct.ts`, `proto/sdp.ts`)
 
@@ -188,8 +189,8 @@ room = joinRoom({ appId: 'aral.cc-battleship',
   2. Show "Send this reply link back": `#a=<blob>` with Copy and Share, plus a copy-code box holding the bare blob.
   3. Show "Waiting for your friend to connect…".
 - **`#a=` tab:** post `{t:'a', blob}` on BroadcastChannel and wait 600 ms for an ack.
-  - With an ack, show "Sent to your game tab. You can close this tab."
-  - Without one, show "Open your game tab and paste this code there", followed by the blob and a Copy button. This is the in-app browser case.
+  - With an ack, show "Sent. Switch back to your game tab."
+  - Without one, show "Go back to Battleship in your browser and paste this code", followed by the blob and a Copy button. This is the in-app browser case.
 - **Timeout:** the host goes to `notice('failed')` 90 s after `setRemoteDescription(answer)` if the channel is not open. The guest has usually just switched to a messenger to send the reply, and their browser is suspended until they come back, so a `connectionState === 'failed'` before the channel opens is not final: Chromium fails the checks about 18 s after the paste, and ICE recovers within a second of the guest's page resuming (measured with the guest frozen by SIGSTOP for 25–40 s). The host's note changes from "Waiting for your friend to come back to the game…" to "Still trying…" when that happens. The guest's step 2 tells them to come back and keep the page open. The guest has no signal for "the host applied my answer": its pc starts ICE checks as soon as it has the offer, because the host's agent answers STUN before it has the answer. So the guest waits up to 5 min for the reply to travel through a messenger.
 - After reading `#o=` or `#a=`, call `history.replaceState` to clear the hash. A `#NNNN` hash stays, so a reload rejoins.
 
@@ -347,7 +348,7 @@ The text is short and literal. There is no marketing copy and no exclamation mar
    - After Ready, the disabled Ready button itself reads "Waiting for opponent…". The opponent's ready state shows as "Opponent ready".
 6. **Battle** (layout in §9.5)
    - The target board is labelled "THEIR WATERS" and your own board "YOUR FLEET".
-   - Status strip: "Your turn" or "Waiting for opponent", plus the last result, e.g. "E4 hit" or "You sank their Cruiser".
+   - Status strip: "Your turn" or "Waiting for opponent", plus the last result, e.g. "E4 hit" or "You sank their Cruiser" (two at once: "You sank their Carrier and Cruiser"). While an item is armed on a touch screen it says "Tap again to fire" (with the torpedo direction or line orientation), since the item hint row can be below the fold.
    - Items mode shows the items bar: 4 buttons with name, cost pips and energy pips. Unaffordable items are disabled. Selecting an item previews its footprint on hover or focus, and a tap or Enter confirms. Esc cancels, and R rotates the Line strike or cycles the torpedo edge.
 7. **End**
    - Heading "You won" / "You lost" (28 px).
@@ -503,12 +504,12 @@ applyAnswer(m, answer): { m, events: UiEvent[] } | { cheat: string }
 | Asset | Budget (gzip -9) | Measured |
 |---|---|---|
 | `index.html` with inlined CSS | ≤ 5.2 KB | 5.0 KB |
-| app JS (entry chunk: game + proto + ui + room) | ≤ 19.5 KB | 19.3 KB |
-| Trystero chunk (lazy, trimmed) | ≤ 16 KB | 15.3 KB |
+| app JS (entry chunk: game + proto + ui + room) | ≤ 19.9 KB | 19.8 KB |
+| Trystero chunk (lazy, trimmed) | ≤ 15.4 KB | 15.0 KB |
 | direct-link chunks (lazy: SDP packing, fallback flows and screens) | ≤ 4.5 KB | 4.0 KB |
-| **Code game total (html + entry + Trystero)** | **≤ 40 KB hard** | **39.7 KB** |
+| **Code game total (html + entry + Trystero)** | **≤ 40 KB hard** | **39.9 KB** |
 
-Measured values are approximate (rounded, as of the mobile round); `npm run size` prints exact ones. Only the 40 KB total is hard; the per-file rows are guard rails with some slack so a small CSS change doesn't fail a deploy while the total still fits. The mobile round moved 0.5 KB of rail from Trystero to the entry: it trimmed Trystero's unused stream and track bookkeeping (0.3 KB) to pay for the wake lock, the background ping and the iOS audio unlock.
+Measured values are approximate (rounded, as of the mobile round); `npm run size` prints exact ones. Only the 40 KB total is hard; the per-file rows are guard rails with some slack so a small CSS change doesn't fail a deploy while the total still fits. The mobile round moved 0.5 KB of rail from Trystero to the entry: it trimmed Trystero's unused stream and track bookkeeping (0.3 KB) to pay for the wake lock, the background ping and the iOS audio unlock. Mobile round 2 moved another 0.4 KB the same way: Trystero's per-peer track plumbing and public media methods went (0.3 KB) to pay for the relay re-check, the wake-lock idle cap and the in-app browser hint.
 
 - The first plan (9 KB entry, 37 KB target) underestimated the UI and anti-cheat code. Instead of raising the budget, the Trystero chunk was trimmed from 22.0 KB to 15.6 KB (`build/trystero/`: no media, no public actions, a one-frame JSON wire for internal messages, no room-password challenge), Vite's preload helper was replaced by a pass-through, the CSS was merged and deduplicated, and the game, protocol and UI modules were rewritten more compactly.
 - No fonts, images or audio files. The favicon is an inline SVG data URI.

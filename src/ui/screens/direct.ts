@@ -2,7 +2,7 @@
 import css from '../../styles/direct.css?inline';
 import type { Controller } from '../../app/controller';
 import { h } from '../h';
-import { btn, copyBtn, gameUrl, label, linkBox, prettyUrl, shareBtn, status, type Screen } from '../kit';
+import { btn, copyBtn, gameUrl, inApp, label, linkBox, prettyUrl, shareBtn, status, type Screen } from '../kit';
 
 document.head.append(h('style', null, css));
 
@@ -13,7 +13,7 @@ const share = (url: string, id: string) => [linkBox(prettyUrl(url), id + '-link'
 
 export function directHost(ctrl: Controller): Screen {
   const el = h('section', 'screen narrow', ...head('Preparing link…'));
-  const paste = h('input', { id: 'paste', cls: 'mono input', placeholder: 'Paste reply', autocomplete: 'off', 'aria-label': 'Reply link or code' });
+  const paste = h('input', { id: 'paste', cls: 'mono input', placeholder: 'Paste reply', autocomplete: 'off', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', 'aria-label': 'Reply link or code' });
   const err = h('p', { cls: 'small error', role: 'alert' });
   const note = h('p', 'small muted');
   const connect = () => paste.value.trim() && ctrl.pasteAnswer(paste.value);
@@ -60,7 +60,7 @@ export function directGuest(ctrl: Controller): Screen {
         'ol',
         'steps',
         step(1, 'Send this reply link back', ...share(gameUrl('a=' + blob), 'answer'), h('p', 'small muted', 'Or copy just the code:'), linkBox(blob, 'answer-code', 'small'), copyBtn(() => blob, 'Copy code')),
-        step(2, 'Come back to this page', h('p', 'small muted', 'Keep it open. The game starts when your friend opens your reply.'), status('Waiting for your friend…')),
+        step(2, 'Come back to this page', h('p', 'small muted', 'Keep it open. The game starts when your friend opens your reply.'), inApp('reply'), status('Waiting for your friend…')),
       ),
       btn('Cancel', () => ctrl.leave(), 'quiet'),
     );
@@ -77,8 +77,8 @@ export function forwarded(ctrl: Controller): Screen {
       { cls: 'screen narrow', id: 'forwarded' },
       label('Direct link'),
       ...(s.ok
-        ? [h('h2', 'h2', 'Sent to your game tab. You can close this tab.')]
-        : [h('h2', 'h2', 'Open your game tab and paste this code there'), linkBox(s.blob, '', 'small'), copyBtn(() => s.blob, 'Copy code')]),
+        ? [h('h2', 'h2', 'Sent. Switch back to your game tab.')]
+        : [h('h2', 'h2', 'Go back to Battleship in your browser and paste this code'), linkBox(s.blob, '', 'small'), copyBtn(() => s.blob, 'Copy code')]),
     ),
   };
 }

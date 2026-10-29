@@ -22,7 +22,7 @@ const MOVES: Record<string, [number, number]> = { ArrowUp: [-1, 0], ArrowDown: [
 export function placement(ctrl: Controller): Screen {
   let sel = 0;
   let ghost: Ghost | null = null; // keyboard lift or drag
-  let drag: { i: number; offset: number; x: number; y: number; moved: boolean; id: number } | null = null;
+  let drag: { i: number; offset: number; x: number; y: number; moved: boolean; id: number; t: number } | null = null;
   const locked = () => ctrl.state.s !== 'placement' || ctrl.state.ready.me;
   const legal = (g: Ghost) => canPlace(ctrl.fleet, g.i, g.ship, ctrl.config.noTouch);
   const where = (g: Ghost) => `${cellName(g.ship.anchor)} ${g.ship.vertical ? 'vertical' : 'horizontal'}`;
@@ -59,7 +59,7 @@ export function placement(ctrl: Controller): Screen {
       e.preventDefault();
       const s = ctrl.fleet[i]!;
       (e.target as Element).setPointerCapture?.(e.pointerId);
-      drag = { i, offset: s.vertical ? (cell - s.anchor) / 10 : cell - s.anchor, x: e.clientX, y: e.clientY, moved: false, id: e.pointerId };
+      drag = { i, offset: s.vertical ? (cell - s.anchor) / 10 : cell - s.anchor, x: e.clientX, y: e.clientY, moved: false, id: e.pointerId, t: e.timeStamp };
       sel = i;
       render();
     },
@@ -82,7 +82,8 @@ export function placement(ctrl: Controller): Screen {
     const d = drag;
     const g = ghost;
     drag = ghost = null;
-    if (!d.moved) rotate(d.i);
+    // A tap rotates; a press held in place (picking the ship up, then letting go) does not.
+    if (!d.moved) e.timeStamp - d.t < 500 && rotate(d.i);
     else if (g) drop(g);
     render();
   });

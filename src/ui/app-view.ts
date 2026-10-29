@@ -40,11 +40,14 @@ export function mountApp(root: HTMLElement, ctrl: Controller): void {
   const yes = h('button', { cls: 'textlink ask', id: 'leave-yes', 'aria-label': 'Leave this game', onclick: () => ctrl.leave() }, 'Leave');
   const stay = h('button', { cls: 'textlink ask', id: 'stay', 'aria-label': 'Stay in this game', onclick: () => (confirm(false), leave.focus()) }, 'Stay');
   const meta = h('div', 'meta small mono muted');
+  // In the header row, in place of the brand, so the board below never moves under a finger.
+  const lost = h('p', { cls: 'status-line small', id: 'lost', role: 'status' }, blink(), 'Connection lost. Waiting…');
   const header = h(
     'header',
     'top',
     h('div', 'brand', mark(), h('span', null, 'Battleship')),
     meta,
+    lost,
     h('p', 'ask', 'Leave game?'),
     yes,
     stay,
@@ -52,8 +55,7 @@ export function mountApp(root: HTMLElement, ctrl: Controller): void {
     mute,
   );
   const main = h('main', { id: 'main' });
-  const lost = h('p', { cls: 'status-line lost', id: 'lost', role: 'status' }, blink(), 'Connection lost. Waiting for your opponent…');
-  root.replaceChildren(header, lost, main);
+  root.replaceChildren(header, main);
   mountAnnouncer(root);
   armAudio();
   ctrl.onSfx = play;
@@ -92,7 +94,7 @@ export function mountApp(root: HTMLElement, ctrl: Controller): void {
     const inGame = live() || s.s === 'end';
     header.classList.toggle('is-home', s.s === 'home');
     leave.hidden = !inGame;
-    lost.hidden = !(ctrl.lost && live());
+    header.classList.toggle('is-lost', !(lost.hidden = !(ctrl.lost && live())));
     meta.textContent = inGame ? rulesLine(ctrl.config) : '';
   };
   ctrl.subscribe(render);

@@ -135,6 +135,10 @@ for (const size of SIZES)
       await B.click('#leave');
       await shot(B, `08b-leave-confirm-${tag}`);
       await B.click('#stay');
+      // The link drops (the opponent switched apps): the notice sits in the header row.
+      await B.evaluate(() => (window as any).__bs.ctrl.t.onstate(false));
+      await shot(B, `08c-link-lost-${tag}`);
+      await B.evaluate(() => (window as any).__bs.ctrl.t.onstate(true));
       await playOut(A, B, A);
       await expect(A.locator('#verdict')).toHaveText('Fleet verified');
       await expect(A.locator('#their-verdict')).toBeVisible();

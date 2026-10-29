@@ -44,6 +44,8 @@ export function home(ctrl: Controller, prefill = ''): Screen {
   input.addEventListener('keydown', (e) => e.key === 'Enter' && submit());
   // The input is invisible: keep the caret at the end so Backspace deletes the last digit.
   input.onfocus = input.onclick = () => input.setSelectionRange(4, 4);
+  // Fetch the matchmaking code while the code is still being typed.
+  input.addEventListener('focus', () => void prefetch(), { once: true });
   paint();
   const create = btn('Create game', () => ctrl.createGame(), 'primary wide', 'create');
   for (const ev of ['pointerenter', 'touchstart', 'focus']) create.addEventListener(ev, () => void prefetch(), { once: true, passive: true });

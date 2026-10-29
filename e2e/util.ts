@@ -1,4 +1,5 @@
-import { expect, type Browser, type BrowserContextOptions, type Page } from '@playwright/test';
+import { execSync } from 'node:child_process';
+import { expect, type Browser, type BrowserContextOptions, type BrowserServer, type Page } from '@playwright/test';
 
 export type Fleet = { anchor: number; vertical: boolean }[];
 const LENS = [5, 4, 3, 3, 2];
@@ -181,3 +182,19 @@ export const setHidden = (p: Page, hidden: boolean) =>
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (hidden ? 'hidden' : 'visible') });
     document.dispatchEvent(new Event('visibilitychange'));
   }, hidden);
+
+/**
+ * Freeze a whole browser (SIGSTOP on its process tree) the way iOS suspends a page in
+ * the background, run `during`, then let it go. Linux only.
+ */
+export async function frozen(server: BrowserServer, during: () => Promise<void>): Promise<void> {
+  const tree = execSync('ps -eo pid=,ppid=').toString().trim().split('\n').map((l) => l.trim().split(/\s+/).map(Number));
+  const all = [server.process().pid!];
+  for (let i = 0; i < all.length; i++) for (const [c, pp] of tree) if (pp === all[i]) all.push(c!);
+  execSync(`kill -STOP ${all.join(' ')}`);
+  try {
+    await during();
+  } finally {
+    execSync(`kill -CONT ${all.join(' ')}`);
+  }
+}

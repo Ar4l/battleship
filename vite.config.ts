@@ -49,10 +49,20 @@ function trimTrystero(): Plugin {
   const patches: [string, RegExp, string][] = [
     // No room password is used, so the password challenge reduces to the user handshake.
     ['handshake', /const overlapRoomPasswordErr[^]*?(?=const toHandshakeErrorMessage)/, 'const createPasswordHandshake = () => ({ compose: (h) => h });\n'],
-    // Trystero drops a peer 5 s after 'disconnected'. Wait longer than our own 20 s
-    // grace (transport.ts) so a phone that is briefly backgrounded keeps the game.
-    ['peer', /const disconnectedCloseDelayMs = 5e3;/, 'const disconnectedCloseDelayMs = 25e3;'],
-    // No audio or video (media.mjs is stubbed): drop the per-room stream and track bookkeeping.
+    // Trystero drops a peer 5 s after 'disconnected', and at once on 'failed'. Neither is
+    // final: ICE recovers when a phone comes back from another app. Leave the decision to
+    // our own grace (GRACE in transport.ts, 90 s): close only on 'closed' or after 100 s.
+    ['peer', /const disconnectedCloseDelayMs = 5e3;/, 'const disconnectedCloseDelayMs = 1e5;'],
+    ['peer', /pc\.connectionState === "failed" \|\| pc\.connectionState === "closed" \|\| pc\.iceConnectionState === "failed" \|\| /, 'pc.connectionState === "closed" || '],
+    // No audio or video (media.mjs is stubbed): drop the per-peer and per-room track plumbing
+    // and the public media methods.
+    ['peer', /\tpc\.ontrack = \(e\) => \{[^]*?\n\t\};\n/, ''],
+    ['peer', /\t\t\tif \(\(handlers\.track \|\| handlers\.stream\) && pendingTracks[^]*?\}\);\n/, ''],
+    ['peer', /,\n\t\taddStream: \(stream\) => stream\.getTracks[^]*?(?=\n\t\};\n\};)/, ''],
+    ['room', /\t\t\tstream: \(stream\) => mediaManager\.receiveRemoteStream\(id, stream\),\n\t\t\ttrack: [^\n]*\n/, ''],
+    ['room', /\t\taddStream: \(stream, options = \{\}\)[^]*?(?=\t\tget onPeerJoin)/, ''],
+    ['room', /,\n\t\tget onPeerStream\(\)[^]*?(?=\n\t\};\n\};)/, ''],
+    // ...and the per-room stream and track bookkeeping.
     ['shared-peer', /\t\t\taddStream: \(stream\) => \{[^]*?(?=\t\t\t__trysteroMedia: shared\.media\n)/, ''],
     ['shared-peer', /\treleaseStreamOwner\(shared[^]*?\n\tpruneRoomOwnership\(shared, roomIdToRemove\) \{[^]*?\n\t\}\n/, '\tpruneRoomOwnership() {}\n'],
   ];

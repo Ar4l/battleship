@@ -12,6 +12,13 @@ export interface Screen {
 export const btn = (text: Child, onclick: () => void, cls = '', id?: string, ic?: IconName): HTMLButtonElement =>
   h('button', { cls: 'btn ' + cls, onclick, id }, ic && icon(ic), h('span', null, text));
 
+/**
+ * In-app browsers (Instagram, Facebook, TikTok…) close the page when you go back to the
+ * chat to send the code, which ends the game: ask to open it in the real browser.
+ */
+export const inApp = (what: string) =>
+  /FBA[NV]|FB_IAB|Instagram|Line\/|musical_ly|Bytedance|Snapchat/.test(navigator.userAgent) && h('p', { cls: 'small', id: 'in-app' }, `Open this page in Safari or Chrome, so the game keeps running while you send the ${what}.`);
+
 export const label = (text: string) => h('div', 'label', text);
 export const blink = () => h('span', { cls: 'blink', 'aria-hidden': 'true' });
 export const status = (text: string) => h('p', 'status-line', blink(), text);

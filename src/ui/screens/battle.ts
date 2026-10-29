@@ -79,9 +79,11 @@ export function battle(ctrl: Controller): Screen {
   const pick = (i: ItemId | null) => {
     item = i;
     dir = 0;
-    armed = null;
+    // The preview follows the next tap, not an old one (or the focused cell).
+    armed = hover = null;
     render();
   };
+  const dirName = () => (item === 1 ? ['from left', 'from right', 'from top', 'from bottom'][dir % 4] : item === 3 && (dir % 2 ? 'vertical' : 'horizontal'));
 
   const itemAttack = (cell: number): Attack | null => {
     if (item === null) return null;
@@ -193,7 +195,7 @@ export function battle(ctrl: Controller): Screen {
       actions.replaceChildren(h('div', 'salvo', fire, clear, h('p', 'small muted', my ? `Pick ${n} cells, then fire.` : `You fire ${n} shot${n > 1 ? 's' : ''} next turn.`)));
     } else if (mode === 2) {
       const it = item === null ? null : ITEMS[item]!;
-      const dirName = item === 1 ? ['from left', 'from right', 'from top', 'from bottom'][dir % 4] : item === 3 && (dir % 2 ? 'vertical' : 'horizontal');
+      const dn = dirName();
       actions.replaceChildren(
         h('div', 'energy', label('Energy'), pips(e, ENERGY_CAP, ''), h('span', { cls: 'mono small', id: 'energy' }, `${e}/${ENERGY_CAP}`)),
         h(
@@ -207,9 +209,11 @@ export function battle(ctrl: Controller): Screen {
                 'aria-pressed': String(item === d.id),
                 'aria-label': `${d.name}, costs ${d.cost}. ${d.desc}`,
                 disabled: !my || e < d.cost,
-                onclick: () => {
+                onclick: (e: MouseEvent) => {
                   pick(item === d.id ? null : d.id);
-                  if (item !== null) target.cells[target.focused()]!.focus({ preventScroll: true });
+                  // Keyboard (detail 0): on to the board, where arrows move the footprint.
+                  // Not for a tap: focus would preview the footprint on a cell nobody chose.
+                  if (item !== null && !e.detail) target.cells[target.focused()]!.focus({ preventScroll: true });
                 },
               },
               h('span', null, d.name),
@@ -227,9 +231,9 @@ export function battle(ctrl: Controller): Screen {
               ? my
                 ? 'Fire a shot, or spend energy on an item.'
                 : 'You gain 1 energy each turn.'
-              : `${it.name}: ${it.desc.toLowerCase()}. ${armed !== null ? 'Tap again to fire' : 'Choose a target'}${dirName ? ', ' + dirName : ''}.`,
+              : `${it.name}: ${it.desc.toLowerCase()}. ${armed !== null ? 'Tap again to fire' : 'Choose a target'}${dn ? ', ' + dn : ''}.`,
           ),
-          dirName && btn(item === 1 ? 'Direction' : 'Rotate', () => (dir++, render()), '', 'item-dir', 'rotate'),
+          dn && btn(item === 1 ? 'Direction' : 'Rotate', () => (dir++, render()), '', 'item-dir', 'rotate'),
           it && btn('Cancel', () => pick(null), 'quiet'),
         ),
       );
@@ -244,7 +248,9 @@ export function battle(ctrl: Controller): Screen {
     if (!my) item = armed = null;
     strip.classList.toggle('mine', my);
     stripText.textContent = s.banner ?? (my ? 'Your turn' : mm.phase === 'awaitingAnswer' ? 'Firing…' : 'Their turn');
-    stripSub.textContent = s.banner ? '' : ctrl.lastResult;
+    // On a phone the item hint can be below the fold: say what the next tap does up here.
+    const dn = dirName();
+    stripSub.textContent = s.banner ? '' : armed !== null && my ? 'Tap again to fire' + (dn ? ', ' + dn : '') : ctrl.lastResult;
     const atk = hover === null ? null : itemAttack(hover);
     const preview = atk?.k === 'item' ? new Set(footprint(atk.item, atk.a, atk.b)) : undefined;
     target.el.classList.toggle('armed', my);

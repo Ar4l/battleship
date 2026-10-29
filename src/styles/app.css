@@ -4,6 +4,8 @@
 }
 html {
   -webkit-text-size-adjust: 100%;
+  /* No double-tap zoom anywhere (pinch still works). Not inherited, but it applies to every descendant. */
+  touch-action: manipulation;
   background: var(--bg);
 }
 body {
@@ -124,7 +126,8 @@ input {
   text-overflow: ellipsis;
 }
 .top .ask,
-.confirm :is(.brand, .meta, #leave) {
+.confirm :is(.brand, .meta, #leave, #lost),
+.is-lost :is(.brand, .meta) {
   display: none;
 }
 .confirm .ask {
@@ -192,7 +195,6 @@ input {
   background: none;
   cursor: pointer;
   white-space: nowrap;
-  touch-action: manipulation;
 }
 .primary,
 .seg :checked + span,
@@ -467,9 +469,6 @@ input {
   letter-spacing: 0.15em;
   margin: -4px 0;
 }
-.lost {
-  margin-bottom: 16px;
-}
 .lobby-settings {
   display: grid;
   gap: 16px;
@@ -533,8 +532,11 @@ input {
 .cell.known {
   background: var(--known);
 }
-.armed .cell:not(.shot):hover {
-  background: color-mix(in srgb, var(--fg) 7%, var(--water));
+/* Touch screens keep :hover on the last tapped cell. */
+@media (hover: hover) {
+  .armed .cell:not(.shot):hover {
+    background: color-mix(in srgb, var(--fg) 7%, var(--water));
+  }
 }
 .cell.pv {
   background: color-mix(in srgb, var(--fg) 12%, var(--water));
@@ -627,10 +629,7 @@ input {
 .mini .field {
   border-color: var(--muted);
 }
-/* No double-tap zoom on a board; a drag that starts on a ship moves it, not the page. */
-.cells {
-  touch-action: manipulation;
-}
+/* A drag that starts on a ship moves it, not the page. */
 .placing .ship {
   touch-action: none;
 }
@@ -806,7 +805,6 @@ input {
   font-size: 13px;
   line-height: 16px;
   font-weight: 600;
-  touch-action: manipulation;
 }
 .item .pips i {
   width: 6px;

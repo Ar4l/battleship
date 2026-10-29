@@ -11,7 +11,7 @@ test('forward: the #a= tab hands the reply to the game tab', async ({ browser })
   const answerLink = (await B.locator('#answer-link').textContent())!;
   const A2 = await A.context().newPage();
   await A2.goto('http://' + answerLink);
-  await expect(A2.locator('#forwarded')).toContainText('Sent to your game tab');
+  await expect(A2.locator('#forwarded')).toContainText('Switch back to your game tab');
   await expect(A.locator('.placement')).toBeVisible({ timeout: 20000 });
   await expect(B.locator('.placement')).toBeVisible({ timeout: 20000 });
 });

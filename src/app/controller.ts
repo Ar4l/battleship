@@ -121,7 +121,7 @@ export class Controller {
       transport: (t) => this.attach(t, role),
       full: () => this.notice('room-full'),
       failed: () => this.notice('failed'),
-      relaysDown: () => this.patch('lobby-host', { relaysDown: true }),
+      relaysDown: (relaysDown) => this.patch('lobby-host', { relaysDown }),
       slow: () => this.patch('lobby-guest', { slow: true }),
       code: (c) => this.patch('lobby-host', { code: (this.lastCode = c) }),
     };
@@ -245,7 +245,8 @@ export class Controller {
     if (now - this.hiddenAt < 10000 || (s !== 'placement' && s !== 'battle')) return;
     this.send({ t: 'ping' });
     // No answer: the link died while we were away. Tell the opponent in case it is only slow.
-    this.timer('ping', 3000, () => this.heard < now && (this.send({ t: 'bye' }), this.notice('away')));
+    // ICE can take a few seconds to recover on cellular.
+    this.timer('ping', 6000, () => this.heard < now && (this.send({ t: 'bye' }), this.notice('away')));
   }
 
   /** `bye`: they left on purpose. */
@@ -403,8 +404,8 @@ export class Controller {
     const who = mine ? 'You' : 'They';
     if (a.k === 'sonar') return mine ? `Sonar: ${a.count} ship cell${a.count === 1 ? '' : 's'}` : 'They used sonar';
     const e = a.entries;
-    const sunk = e.filter((x) => x.code > 1).map((x) => `${who} sank ${mine ? 'their' : 'your'} ${SHIP_NAMES[x.code - 2]}`);
-    if (sunk.length) return sunk.join('. ');
+    const sunk = e.filter((x) => x.code > 1).map((x) => SHIP_NAMES[x.code - 2]);
+    if (sunk.length) return `${who} sank ${mine ? 'their' : 'your'} ${sunk.join(' and ')}`;
     if (!e.length) return `${mine ? 'Your' : 'Their'} torpedo ran clean`;
     const hits = e.filter((x) => x.code).map((x) => cellName(x.cell));
     if (e.length === 1) return `${who} fired at ${cellName(e[0]!.cell)}: ${hits.length ? 'hit' : 'miss'}`;
