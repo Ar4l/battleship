@@ -28,6 +28,12 @@ Tick items (`[x]`) when done and verified. Owner in brackets.
 - [x] Russian + Salvo works (Russian drops "hit shoots again" under Salvo); Salvo shots = ships left, capped at 5 [logic]
 - [x] Simultaneous Salvo: both pick shots at once, resolve when both sent; draw if both fleets sink in the same round; prefire hidden in this mode [logic + ui]
 
+## Round 6: items
+- [ ] Rebalance items (research other games + a quick simulation of value per energy) [logic]
+- [ ] Airstrike: hits the chosen square plus random squares near it, as in other games (fair randomness from the shared seed) [logic + ui]
+- [ ] New item source "Pickups": item squares appear on the target board; shooting one gives you an item (inventory instead of energy) [logic + ui]
+- [ ] Prefire in Items mode: queue an item (aimed) during their turn; it fires first at turn start, skipped with a note if unaffordable [logic + ui]
+
 ## UI notes (round 4)
 
 Where the UI differs from UX-SPEC.md, mostly to stay under 44 KB:
