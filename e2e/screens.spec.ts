@@ -111,7 +111,7 @@ for (const size of SIZES)
           const cs = getComputedStyle(el);
           if (cs.boxShadow !== 'none') bad.push('box-shadow ' + el.className);
           if (cs.backdropFilter && cs.backdropFilter !== 'none') bad.push('backdrop-filter ' + el.className);
-          if (/gradient/.test(cs.backgroundImage) && !el.closest('.is-sunk')) bad.push('gradient ' + el.className);
+          if (/gradient/.test(cs.backgroundImage) && !el.closest('.sunk')) bad.push('gradient ' + el.className);
           for (const c of [cs.color, cs.backgroundColor, cs.borderTopColor]) {
             const m = /rgba?\((\d+), (\d+), (\d+)/.exec(c);
             if (!m) continue;

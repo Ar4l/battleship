@@ -3,7 +3,7 @@ import { cellName } from '../../game/board';
 import { canPlace, rulesLine } from '../../game/rules';
 import type { Geo, Ship } from '../../game/types';
 import { announce } from '../announce';
-import { board, capsule, cellsOf } from '../grid';
+import { board, capsule, cellsOf, land } from '../grid';
 import { h } from '../h';
 import { btn, label, type Screen } from '../kit';
 
@@ -48,14 +48,14 @@ export function placement(ctrl: Controller): Screen {
     return false;
   };
   const rotate = (i: number) => {
-    if (locked()) return;
+    if (locked() || geo().fleet[i] === 1) return;
     const g = { i, ship: shift(geo(), i, ctrl.fleet[i]!, 0, 0, true) };
     place(g, `${SHIP_NAMES[i]} ${where(g)}.`, "Can't rotate here.");
     render();
   };
   const drop = (g: Ghost) => place(g, `${SHIP_NAMES[g.i]} placed at ${cellName(g.ship.anchor, geo().n)}.`);
 
-  const b = board('Your fleet', false, {
+  const b = board('Your fleet', false, geo().n, {
     onPointerDown: (cell, e) => {
       const i = ctrl.fleet.findIndex((s, k) => cellsOf(geo(), s, k).includes(cell));
       if (locked() || i < 0) return;
@@ -96,12 +96,15 @@ export function placement(ctrl: Controller): Screen {
     render();
   });
 
+  // A legend of chips: the first ship of a class shows its name (and ×n); the rest only their capsule.
+  const count = (name: string) => SHIP_NAMES.filter((x) => x === name).length;
   const dockBtns = SHIP_NAMES.map((name, i) =>
     h(
       'button',
       {
         cls: 'dock-ship',
         'data-ship': i,
+        'aria-label': `${name}, ${geo().fleet[i]} cells`,
         onclick: (e: MouseEvent) => {
           if (locked()) return;
           sel = i;
@@ -134,13 +137,12 @@ export function placement(ctrl: Controller): Screen {
         },
       },
       h('span', { cls: 'cap-ship', style: `--len:${geo().fleet[i]}` }),
-      h('span', null, name),
-      h('span', 'mono muted small', geo().fleet[i]),
+      SHIP_NAMES.indexOf(name) === i && h('span', null, name, count(name) > 1 && h('span', 'mono', ' ×' + count(name))),
     ),
   );
 
   const rules = h('p', 'small muted rules');
-  const status = h('p', 'status-line');
+  const hint = h('p', 'small muted pl-hint');
   const randomize = btn('Randomize', () => ((ghost = null), ctrl.randomize()), '', 'randomize', 'dice');
   const rot = btn('Rotate', () => rotate(sel), '', 'rotate', 'rotate');
   const ready = btn('Ready', () => void ctrl.ready(), 'primary wide', 'ready');
@@ -153,11 +155,10 @@ export function placement(ctrl: Controller): Screen {
     h(
       'div',
       'pl-side',
-      h('p', 'small muted', 'Drag ships to move them. Tap or click a ship to rotate it.'),
+      hint,
       h('ul', { cls: 'dock', 'aria-label': 'Ships' }, dockBtns.map((d) => h('li', null, d))),
       h('div', 'row-btns', randomize, rot),
       ready,
-      status,
     ),
   );
 
@@ -167,23 +168,29 @@ export function placement(ctrl: Controller): Screen {
     const me = s.ready.me;
     rules.textContent = rulesLine(ctrl.config);
     const occ: number[] = [];
-    let ov = '';
+    let ov = land(geo());
     ctrl.fleet.forEach((sh, i) => {
       cellsOf(geo(), sh, i).forEach((c) => (occ[c] = i));
       ov += capsule(sh, geo().fleet[i]!, 'own' + (ghost?.i === i ? ' lifted' : '') + (i === sel && !me ? ' selected' : ''));
     });
     if (ghost) ov += capsule(ghost.ship, geo().fleet[ghost.i]!, 'ghost' + (legal(ghost) ? '' : ' bad'));
     // Ship cells take the drag; water lets the page scroll and zoom (occ is sparse: water stays empty).
-    b.update({ cls: occ.map(() => (me ? '' : 'ship')), labels: Array.from({ length: geo().n ** 2 }, (_, c) => cellName(c, geo().n) + (occ[c] === undefined ? '' : ', ' + SHIP_NAMES[occ[c]!])), overlay: ov });
+    const isl = geo().islands;
+    b.update({
+      cls: Array.from({ length: geo().n ** 2 }, (_, c) => (isl.has(c) ? 'land' : occ[c] === undefined || me ? '' : 'ship')),
+      labels: Array.from({ length: geo().n ** 2 }, (_, c) => cellName(c, geo().n) + (isl.has(c) ? ', land' : occ[c] === undefined ? '' : ', ' + SHIP_NAMES[occ[c]!])),
+      overlay: ov,
+    });
     dockBtns.forEach((d, i) => {
       d.setAttribute('aria-pressed', String(i === sel));
       d.classList.toggle('lifted', ghost?.i === i);
       d.disabled = me;
     });
-    randomize.disabled = rot.disabled = ready.disabled = me;
+    randomize.disabled = ready.disabled = me;
+    rot.disabled = me || geo().fleet[sel] === 1;
     // The waiting state shows where the player just tapped.
     ready.lastChild!.textContent = me ? (s.ready.them ? 'Starting…' : 'Waiting for opponent…') : 'Ready';
-    status.replaceChildren(!me && s.ready.them ? h('span', { id: 'opp-ready' }, 'Opponent ready') : '');
+    hint.replaceChildren(!me && s.ready.them ? h('span', { id: 'opp-ready' }, 'Opponent ready') : 'Drag to move. Tap a ship to rotate.');
   }
   render();
   return { el, update: render };

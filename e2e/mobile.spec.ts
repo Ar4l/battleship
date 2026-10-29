@@ -89,24 +89,25 @@ test('phones: an Items game by touch alone (iPhone 13 hosts, Pixel 7 joins)', as
   await expect(A.locator('.battle')).toBeVisible();
   await fits(A, 'battle');
 
-  // Torpedo: the armed hint still says which way it runs, and Direction changes it.
+  // Torpedo: the footprint shows as soon as an item is picked; a tap aims, a second tap fires.
   await aOnTurnWithEnergy(A, B);
-  // Picking an item shows no footprint until the board is tapped.
   await A.getByRole('button', { name: /^Cross bomb/ }).tap();
-  await expect(A.locator('.a-target .cell.pv')).toHaveCount(0);
+  await expect(A.locator('.a-target .cell.pv')).not.toHaveCount(0);
+  await expect(A.locator('#item-dir')).toBeHidden();
   await A.getByRole('button', { name: /^Torpedo/ }).tap();
-  await expect(A.locator('.a-target .cell.pv')).toHaveCount(0);
+  await expect(A.locator('.a-target .cell.lane')).not.toHaveCount(0);
+  await expect(A.locator('#item-fire')).toBeDisabled();
   await targetCell(A, 45).tap();
-  await expect(A.locator('.a-target .cell.pv')).toHaveCount(10);
-  const hint = A.locator('.item-hint > span');
-  await expect(hint).toContainText('Tap again to fire, from left.');
-  // The hint row can be below the fold on a phone: the strip says it too.
+  await expect(A.locator('.a-target .cell.lane')).toHaveCount(10);
+  await expect(A.locator('.a-target .ov .arrow')).toHaveCount(1);
+  await expect(A.locator('.item-hint > span')).toContainText('Tap again to fire.');
   await expect(A.locator('.strip-sub')).toHaveText('Tap again to fire, from left');
+  await expect(A.locator('#item-dir')).toHaveText('From left');
   await A.locator('#item-dir').tap();
-  await expect(hint).toContainText('Tap again to fire, from right.');
-  await expect(A.locator('.strip-sub')).toHaveText('Tap again to fire, from right');
+  await expect(A.locator('#item-dir')).toHaveText('From top');
+  await expect(A.locator('.strip-sub')).toHaveText('Tap again to fire, from top');
   expect(await A.evaluate(() => (window as any).__bs.state().match.phase)).toBe('myTurn');
-  await targetCell(A, 45).tap();
+  await A.locator('#item-fire').tap();
   await expect.poll(() => A.evaluate(() => (window as any).__bs.state().match.phase)).toBe('theirTurn');
 
   // Long results wrap instead of being cut off, and nothing scrolls sideways.

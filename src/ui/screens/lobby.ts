@@ -22,7 +22,7 @@ export function lobbyHost(ctrl: Controller): Screen {
       inApp('code'),
       net,
     ),
-    h('div', 'lobby-settings', h('h2', 'h3', 'Rules'), settings(ctrl.config, (p) => ctrl.setConfig(p))),
+    h('div', 'lobby-settings', h('h2', 'h3', 'Rules'), settings(ctrl)),
     h('div', 'lobby-foot', btn('Cancel', () => ctrl.leave(), 'quiet')),
   );
   const update = () => {

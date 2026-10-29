@@ -199,8 +199,7 @@ input {
 .primary,
 .seg :checked + span,
 :checked + .track,
-.item[aria-pressed='true'],
-.strip.mine {
+.item[aria-pressed='true'] {
   background: var(--fg);
   color: var(--bg);
   font-weight: 600;
@@ -251,8 +250,12 @@ input {
   max-width: 400px;
 }
 .seg {
-  display: inline-flex;
-  max-width: 100%;
+  display: flex;
+  width: 100%;
+}
+.seg label {
+  flex: 1;
+  min-width: 0;
 }
 .seg label,
 .toggle {
@@ -269,8 +272,8 @@ input {
 }
 .seg span {
   height: 44px;
-  min-width: 64px;
-  padding: 0 14px;
+  padding: 0 6px;
+  white-space: nowrap;
   display: grid;
   place-items: center;
   font-size: 15px;
@@ -278,6 +281,14 @@ input {
 }
 .seg label + label span {
   border-left: 1px solid var(--fg);
+}
+.seg :disabled + span {
+  opacity: 0.4;
+}
+@media (hover: hover) {
+  .seg :not(:checked, :disabled) + span:hover {
+    background: var(--water);
+  }
 }
 .seg :focus-visible + span,
 .toggle :focus-visible + .track {
@@ -287,33 +298,46 @@ input {
 .toggle {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
-  min-height: 44px;
+  min-height: 52px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.toggle:first-child {
+  border-top: 1px solid var(--rule);
+}
+.tl {
+  display: grid;
+}
+.why {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--muted);
 }
 .toggle:has(:disabled) {
   opacity: 0.4;
   cursor: default;
 }
-.toggle input {
-  width: 36px;
-}
 .track {
   flex: none;
-  width: 36px;
-  height: 20px;
+  width: 44px;
+  height: 26px;
   position: relative;
+  background: var(--water);
 }
 .track::after {
   content: '';
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 14px;
-  height: 14px;
-  background: var(--fg);
+  width: 20px;
+  height: 20px;
+  border-radius: 1px;
+  background: var(--muted);
 }
 :checked + .track::after {
-  left: 18px;
+  left: 20px;
   background: var(--bg);
 }
 .settings,
@@ -324,8 +348,7 @@ input {
 .end-head,
 .end-actions,
 .pl-head,
-.pl-side,
-.items {
+.pl-side {
   display: grid;
   gap: 16px;
   align-content: start;
@@ -333,7 +356,9 @@ input {
   grid-template-columns: minmax(0, 1fr);
 }
 .settings {
-  gap: 20px;
+  gap: 24px;
+  justify-items: stretch;
+  max-width: 440px;
 }
 .opt {
   gap: 8px;
@@ -463,8 +488,8 @@ input {
   vector-effect: non-scaling-stroke;
 }
 .room-code {
-  font-size: 56px;
-  line-height: 64px;
+  font-size: 48px;
+  line-height: 56px;
   font-weight: 600;
   letter-spacing: 0.15em;
   margin: -4px 0;
@@ -477,9 +502,12 @@ input {
 }
 /* ---------- board ---------- */
 .board {
-  --c: var(--cell);
+  /* Cell size: fill the column (2 gutters, the 16 px row labels and the 1 px rules), and
+     leave room under the board for the dock on short screens. */
+  --cs: clamp(14px, min((min(100vw, 480px) - 2 * var(--gutter) - 17px) / var(--n) - 1px, (100dvh - 340px) / var(--n) - 1px), 40px);
+  --c: var(--cs);
   display: grid;
-  grid-template: 20px auto / 20px auto;
+  grid-template: 20px auto / 16px auto;
   width: max-content;
   align-self: start;
   user-select: none;
@@ -496,10 +524,10 @@ input {
   padding: 1px;
 }
 .colh {
-  grid-template-columns: repeat(10, var(--c));
+  grid-template-columns: repeat(var(--n), var(--c));
 }
 .rowh {
-  grid-template-rows: repeat(10, var(--c));
+  grid-template-rows: repeat(var(--n), var(--c));
 }
 .field {
   position: relative;
@@ -508,7 +536,7 @@ input {
 }
 .cells {
   display: grid;
-  grid-template-columns: repeat(10, var(--c));
+  grid-template-columns: repeat(var(--n), var(--c));
   grid-auto-rows: var(--c);
   gap: 1px;
 }
@@ -526,15 +554,46 @@ input {
   color: transparent;
   position: relative;
 }
-.armed .cell:not(.shot) {
+.armed .cell:not(.shot, .land) {
   cursor: crosshair;
 }
+.cell.land {
+  background: var(--land);
+  pointer-events: none;
+}
+.land {
+  fill: var(--land);
+}
+.coast {
+  fill: none;
+  stroke: var(--fg);
+  stroke-opacity: 0.6;
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+.mini .coast {
+  display: none;
+}
+/* The live board (where this turn's shot lands) has a 2 px frame; the other recedes into the page. */
+.live .field {
+  outline: 1px solid var(--fg);
+}
+.live :is(.colh, .rowh) {
+  color: var(--fg);
+}
+.dim .field {
+  border-color: var(--rule);
+}
+.dim .cell:not(.known, .land) {
+  background: var(--bg);
+}
+
 .cell.known {
   background: var(--known);
 }
 /* Touch screens keep :hover on the last tapped cell. */
 @media (hover: hover) {
-  .armed .cell:not(.shot):hover {
+  .armed .cell:not(.shot, .land):hover {
     background: color-mix(in srgb, var(--fg) 7%, var(--water));
   }
 }
@@ -542,6 +601,21 @@ input {
   background: color-mix(in srgb, var(--fg) 12%, var(--water));
   outline: 1px solid var(--fg);
   outline-offset: -1px;
+}
+.cell.pv.shot {
+  outline: 0;
+}
+.cell.lane {
+  background: color-mix(in srgb, var(--fg) 6%, var(--water));
+}
+.tpath {
+  fill: none;
+  stroke: var(--fg);
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+}
+.arrow {
+  fill: var(--fg);
 }
 .cell:focus-visible {
   outline: 3px solid var(--fg);
@@ -589,6 +663,7 @@ input {
 .ring,
 .sunk,
 .last,
+.queued,
 .sonar,
 .ghost,
 .own.selected {
@@ -620,7 +695,8 @@ input {
   opacity: 0.3;
 }
 .mini {
-  --c: calc(var(--cell) * 0.55);
+  /* The minimap: 120 px outside, the 1 px rules included. */
+  --c: calc((119px - var(--n) * 1px) / var(--n));
   grid-template: 0 auto / 0 auto;
 }
 .mini :is(.colh, .rowh) {
@@ -635,7 +711,7 @@ input {
 }
 .cap {
   text-align: center;
-  padding-left: 20px;
+  padding-left: 16px;
   margin-bottom: 6px;
 }
 .a-own .cap,
@@ -646,43 +722,45 @@ input {
 
 /* ---------- placement ---------- */
 .placement {
-  gap: 20px;
+  gap: 12px;
 }
 .pl-head {
-  gap: 4px;
+  gap: 0;
 }
 .pl-side {
   justify-items: stretch;
+  gap: 10px;
+}
+.pl-hint #opp-ready {
+  color: var(--fg);
 }
 .dock {
   list-style: none;
   padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 0 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 14px;
 }
 .dock-ship {
-  width: 100%;
-  height: 44px;
-  display: grid;
-  grid-template-columns: 46px 1fr auto;
+  height: 32px;
+  display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 8px 0 0;
+  gap: 6px;
+  padding: 0;
   border: 0;
-  border-bottom: 1px solid var(--rule);
   background: none;
-  text-align: left;
   cursor: pointer;
   font-size: 14px;
+  color: var(--muted);
 }
 .dock-ship[aria-pressed='true'] {
-  font-weight: 700;
+  color: var(--fg);
+  font-weight: 600;
 }
 .cap-ship {
-  width: calc(var(--len) * 9px);
-  height: 8px;
-  border-radius: 4px;
+  width: calc(var(--len) * 8px);
+  height: 6px;
+  border-radius: 3px;
   background: var(--muted);
 }
 [aria-pressed='true'] .cap-ship {
@@ -697,10 +775,11 @@ input {
 }
 
 /* ---------- battle ---------- */
+/* Phones (portrait) first: header, turn bar, target board, item row, then minimap + panel. */
 .battle {
-  grid-template-columns: auto 1fr;
-  grid-template-areas: 'target target' 'strip strip' 'actions actions' 'stall stall' 'own theirs' 'own yours';
-  gap: 12px 16px;
+  grid-template-columns: 120px minmax(0, 1fr);
+  grid-template-areas: 'strip strip' 'target target' 'items items' 'stall stall' 'own side' 'lists lists';
+  gap: 8px 12px;
   justify-items: stretch;
 }
 .a-strip {
@@ -710,8 +789,8 @@ input {
   grid-area: target;
   justify-self: center;
 }
-.actions {
-  grid-area: actions;
+.a-items {
+  grid-area: items;
 }
 .a-stall {
   grid-area: stall;
@@ -719,83 +798,158 @@ input {
 .a-own {
   grid-area: own;
 }
-.a-theirs {
-  grid-area: theirs;
+.a-side {
+  grid-area: side;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
 }
-.a-yours {
-  grid-area: yours;
+.a-lists {
+  grid-area: lists;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px;
+  padding-top: 8px;
 }
-.actions:empty,
+.a-items:empty,
 .a-stall:empty {
   display: none;
 }
 .strip {
-  min-height: 44px;
+  position: relative;
+  height: 44px;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 0 12px;
-  padding: 6px 12px;
+  gap: 8px;
+  padding: 0 12px;
+  border-width: 1px 0;
+  border-color: var(--rule);
+  border-radius: 0;
   color: var(--muted);
 }
+.tsq {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  background: var(--fg);
+}
 .strip-main {
-  font-size: 20px;
+  flex: none;
+  font-size: 18px;
   font-weight: 600;
   white-space: nowrap;
 }
+.secs {
+  font-size: 14px;
+  margin-left: auto;
+}
+.strip-r {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  text-align: right;
+}
 .strip-sub {
   font-size: 14px;
-  line-height: 20px;
+  line-height: 17px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.strip .textlink {
+  min-height: 0;
+  font-size: 14px;
+}
+[data-turn='me'] .strip {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--bg);
+}
+[data-turn='me'] .tsq {
+  width: 8px;
+  height: 8px;
+  background: var(--signal);
+}
+[data-turn='me'] .strip-sub {
+  font-weight: 400;
 }
 .timer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   height: 3px;
-  margin-top: 2px;
 }
 .timer i {
   display: block;
   height: 100%;
-  background: var(--fg);
+  background: var(--muted);
   transform-origin: left;
   transform: scaleX(0);
 }
-.timer .low {
+[data-turn='me'] .timer i {
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
+}
+.timer .low,
+[data-turn='me'] .timer .low {
   background: var(--signal);
 }
-.actions,
-.salvo,
 .energy,
-.item-hint {
+.act-btns {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 4px 8px;
 }
-.actions {
+.act {
   display: grid;
+  gap: 6px;
+  margin-top: auto;
 }
-.salvo .primary {
-  min-width: 128px;
+.act-btns {
+  flex-wrap: nowrap;
+}
+.act-btns .btn {
+  height: 44px;
+  padding: 0 8px;
+  font-size: 14px;
+  gap: 6px;
+}
+#item-dir {
+  flex: 1;
+  min-width: 0;
+}
+#item-fire {
+  min-width: 72px;
 }
 .pips {
   display: inline-flex;
   gap: 3px;
 }
 .pips i {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border: 1px solid;
 }
 .pips .on {
   background: currentColor;
 }
+.pips .spend {
+  background: var(--muted);
+  border-color: var(--muted);
+}
 .items {
-  grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
-  justify-items: stretch;
+  display: flex;
 }
 .item {
-  height: 56px;
+  flex: 1;
+  min-width: 0;
+  height: 52px;
   display: grid;
   justify-items: center;
   align-content: center;
@@ -805,16 +959,42 @@ input {
   font-size: 13px;
   line-height: 16px;
   font-weight: 600;
+  border-radius: 0;
+}
+.item + .item {
+  border-left: 0;
+}
+.item:first-child {
+  border-radius: 2px 0 0 2px;
+}
+.item:last-child {
+  border-radius: 0 2px 2px 0;
+}
+.item .pips {
+  gap: 4px;
 }
 .item .pips i {
   width: 6px;
   height: 6px;
+  border: 0;
 }
 .item-hint {
-  min-height: 48px;
+  font-size: 14px;
+  line-height: 18px;
 }
-.item-hint > span {
-  flex: 1 1 200px;
+.item-hint .textlink {
+  min-height: 0;
+}
+.tally {
+  display: grid;
+}
+.tally span {
+  display: inline-block;
+  width: 5ch;
+}
+.tally .textlink {
+  justify-self: start;
+  min-height: 24px;
 }
 .fleet ul {
   list-style: none;
@@ -826,15 +1006,21 @@ input {
   justify-content: space-between;
   align-items: center;
   gap: 8px;
-  height: 24px;
+  min-height: 24px;
   font-size: 14px;
+}
+.ships {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
 }
 .segs {
   display: inline-flex;
-  gap: 2px;
+  gap: 1px;
 }
 .segs i {
-  width: 9px;
+  width: 8px;
   height: 8px;
   border: 1px solid var(--muted);
 }
@@ -846,7 +1032,7 @@ input {
   color: var(--muted);
   text-decoration: line-through 1px;
 }
-.is-sunk .segs i:not(.hit) {
+.sunk i:not(.hit) {
   border-color: var(--fg);
   background: repeating-linear-gradient(45deg, var(--fg) 0 1px, transparent 1px 3px);
 }
@@ -969,19 +1155,34 @@ input {
   .meta {
     visibility: hidden;
   }
-  /* Room for a result on a second line, so the controls below don't jump. */
-  .strip {
-    min-height: 58px;
+  .top {
+    height: 44px;
+    margin-bottom: 16px;
   }
-}
-@media (min-width: 600px) {
-  .rules {
+  .row-btns > .btn {
+    flex: 1;
+  }
+  /* Battle: 12 px gutter, the turn bar edge to edge, no header rule (the bar does that job). */
+  [data-screen='battle'] {
+    --gutter: 12px;
+  }
+  [data-screen='battle'] .top {
+    border-color: transparent;
+    margin-bottom: 0;
+  }
+  .a-strip {
+    margin: 0 calc(-1 * var(--gutter));
+  }
+  .battle .cap {
     display: none;
   }
 }
-@media (min-width: 900px) {
+@media (min-width: 900px) and (min-height: 501px) {
+  .board {
+    --cs: clamp(24px, min((100vh - 480px) / var(--n), (100vw - 360px) / (2 * var(--n))), 48px);
+    grid-template: 20px auto / 20px auto;
+  }
   :root {
-    --cell: clamp(40px, min((100vh - 480px) / 10, (100vw - 360px) / 20), 48px);
     --gutter: 32px;
   }
   .home {
@@ -1003,12 +1204,12 @@ input {
   }
   .lobby {
     grid-template-columns: 1fr 1fr;
-    column-gap: 64px;
+    column-gap: 48px;
   }
   .lobby-settings {
     border: 0;
     border-left: 1px solid var(--rule);
-    padding: 0 0 0 64px;
+    padding: 0 0 0 48px;
   }
   .placement {
     grid-template-columns: auto 1fr;
@@ -1019,31 +1220,82 @@ input {
     padding-top: 26px;
   }
   .dock {
-    grid-template-columns: 1fr;
+    flex-direction: column;
   }
-  /* Column 1 is as wide as the board: the actions wrap inside it rather than widening it. */
+  /* Column 1 is as wide as the board: the dock wraps inside it rather than widening it. */
   .battle {
-    grid-template-columns: max-content auto;
+    grid-template-columns: max-content max-content;
     justify-content: start;
-    grid-template-areas: 'strip strip' 'stall stall' 'target own' 'actions .' 'theirs yours';
+    grid-template-areas: 'strip strip' 'stall stall' 'target own' 'energy .' 'items .' 'act .' 'theirs yours';
     gap: 16px 48px;
   }
-  .actions {
+  .strip {
+    height: 48px;
+    border-width: 1px 0;
+  }
+  .a-side,
+  .a-lists {
+    display: contents;
+  }
+  .tally,
+  .act .rules {
+    display: none;
+  }
+  .energy {
+    grid-area: energy;
+  }
+  .act {
+    grid-area: act;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+  }
+  .act .item-hint {
+    flex: 1 1 200px;
+  }
+  .act-btns .btn {
+    height: 48px;
+    padding: 0 16px;
+  }
+  #item-dir {
+    flex: none;
+  }
+  #fire {
+    width: auto;
+    min-width: 128px;
+  }
+  .a-theirs {
+    grid-area: theirs;
+  }
+  .a-yours {
+    grid-area: yours;
+  }
+  .a-items,
+  .energy,
+  .act {
     width: 0;
     min-width: 100%;
+  }
+  .item {
+    height: 56px;
   }
   .a-target {
     justify-self: start;
   }
   .a-own .mini,
   .end-boards .mini {
-    --c: var(--cell);
+    --c: var(--cs);
     grid-template: 20px auto / 20px auto;
   }
   .a-own .mini :is(.colh, .rowh),
   .end-boards .mini :is(.colh, .rowh) {
     visibility: visible;
   }
+  .mini .coast {
+    display: inline;
+  }
+  .cap,
   .a-own .cap,
   .end-boards div + div .cap {
     padding-left: 20px;
@@ -1051,19 +1303,19 @@ input {
   }
   .a-theirs,
   .a-yours,
-  .actions {
+  .a-items,
+  .energy,
+  .act {
     padding-left: 20px;
   }
   .fleet ul {
-    display: grid;
-    grid-template-columns: repeat(5, auto);
-    justify-content: start;
-    column-gap: 20px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 20px;
   }
   .fleet li {
     flex-direction: column;
     align-items: flex-start;
-    height: auto;
     gap: 4px;
   }
   .end {
@@ -1075,16 +1327,25 @@ input {
     grid-row: 1 / 3;
   }
 }
+/* Phones on their side, whatever the width: board left (sized to the height), panel right. */
 @media (orientation: landscape) and (max-height: 500px) {
   :root {
-    --cell: clamp(18px, calc((100dvh - 120px) / 10), 34px);
+    --gutter: 12px;
+  }
+  .board {
+    --cs: clamp(14px, (100dvh - 70px) / var(--n) - 1px, 40px);
+    grid-template: 20px auto / 16px auto;
   }
   .top {
-    height: 44px;
+    height: 36px;
     margin-bottom: 8px;
+    border-color: transparent;
+  }
+  #app {
+    padding-bottom: 8px;
   }
   .placement {
-    grid-template-columns: auto 1fr;
+    grid-template-columns: auto minmax(0, 1fr);
     gap: 8px 24px;
   }
   .placing {
@@ -1100,11 +1361,36 @@ input {
     height: 44px;
   }
   .battle {
-    grid-template-columns: auto auto minmax(0, 1fr);
-    grid-template-areas: 'target own strip' 'target own actions' 'target yours theirs' 'stall stall stall';
-    gap: 8px 16px;
+    grid-template-columns: auto 112px minmax(0, 396px);
+    grid-template-areas: 'target strip strip' 'target items items' 'target own side' 'target stall stall' 'target lists lists';
+    grid-template-rows: auto auto auto auto 1fr;
+    justify-content: center;
+    gap: 8px 12px;
+  }
+  .a-target {
+    margin-right: 4px;
+    position: sticky;
+    top: 0;
+    align-self: start;
+  }
+  .a-strip {
+    margin: 0;
+  }
+  .strip {
+    height: 40px;
+    border-width: 1px;
+    border-radius: 2px;
+  }
+  .battle .cap {
+    display: none;
+  }
+  .item {
+    height: 48px;
+  }
+  .mini {
+    grid-template: 0 auto / 0 auto;
   }
   .a-own .mini {
-    --c: calc(var(--cell) * 0.7);
+    --c: calc((111px - var(--n) * 1px) / var(--n));
   }
 }

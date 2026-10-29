@@ -48,7 +48,11 @@ export async function hostLobby(A: Page, mode: 'Classic' | 'Salvo' | 'Items' | '
   await A.click('#create');
   await expect(A.locator('#room-code')).toHaveText(/^\d{4}$/);
   await A.getByRole('radio', { name: mode }).click();
-  for (const t of extra) await A.getByText(t, { exact: true }).click();
+  // Radios (e.g. a map size) by role; switches by their label text.
+  for (const t of extra) {
+    const radio = A.getByRole('radio', { name: t, exact: true });
+    await ((await radio.count()) ? radio : A.getByText(t, { exact: true })).click();
+  }
 }
 
 /** Connect A (host) and B (guest) through the two-link direct fallback. */

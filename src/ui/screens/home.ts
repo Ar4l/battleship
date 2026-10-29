@@ -1,6 +1,6 @@
 import type { Controller } from '../../app/controller';
 import { prefetch } from '../../net/room';
-import { capsule, hit, last, miss } from '../grid';
+import { capsule, hit, last, miss, setN } from '../grid';
 import { h, html } from '../h';
 import { btn, type Screen } from '../kit';
 
@@ -12,6 +12,7 @@ export const mark = () =>
 
 /** Static plotted board used as the home illustration on wide screens. */
 const chart = () => {
+  setN(10);
   let s = '<svg class="art" viewBox="0 0 10 10"><rect class="art-bg" width="10" height="10"/><path class="art-rule" d="';
   for (let i = 1; i < 10; i++) s += `M${i} 0v10M0 ${i}h10`;
   s += '"/>' + capsule({ anchor: 21, vertical: false }, 4, 'own') + capsule({ anchor: 47, vertical: true }, 3, 'own');
@@ -29,11 +30,14 @@ export function home(ctrl: Controller, prefill = ''): Screen {
     else err.textContent = 'Enter the 4-digit code from your friend.';
   };
   const boxes = [0, 1, 2, 3].map(() => h('span'));
-  const paint = () =>
+  const paint = () => {
+    join.disabled = input.value.length < 4;
     boxes.forEach((b, i) => {
       b.textContent = input.value[i] ?? '';
       b.className = i === Math.min(input.value.length, 3) ? 'at' : '';
     });
+  };
+  const join = btn('Join', submit, '', 'join');
   input.addEventListener('input', () => {
     const v = (input.value = input.value.replace(/\D/g, '').slice(0, 4));
     paint();
@@ -60,7 +64,7 @@ export function home(ctrl: Controller, prefill = ''): Screen {
       h('p', 'lede muted', 'Two players. Peer-to-peer. No sign-up.'),
       create,
       h('div', 'divider label', 'Or join with a code'),
-      h('div', 'join', h('div', 'code mono', input, h('div', { cls: 'boxes', 'aria-hidden': 'true' }, boxes)), btn('Join', submit, '', 'join')),
+      h('div', 'join', h('div', 'code mono', input, h('div', { cls: 'boxes', 'aria-hidden': 'true' }, boxes)), join),
       err,
     ),
     h('div', { cls: 'home-art', 'aria-hidden': 'true' }, chart()),

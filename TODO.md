@@ -4,22 +4,33 @@ Tick items (`[x]`) when done and verified. Owner in brackets.
 
 ## Carried over
 - [x] Guest switching apps mid-join gets a false "Couldn't connect" (half-done in `src/net/room.ts`) [logic]
-- [ ] Large phones in landscape (≥900×≤500) get the desktop layout and scroll sideways [ui]
+- [x] Large phones in landscape (≥900×≤500) get the desktop layout and scroll sideways [ui]
 
 ## Gameplay
 - [x] Cross bomb can't be aimed at an already-hit square — allow it (skip already-revealed cells; block only if nothing new would be hit) [logic]
-- [ ] Add Airstrike item [logic + ui] — logic done: item 4, cost 4, 5 cells on a diagonal
-- [ ] "Extra shot after a hit" also available in Items mode [logic + ui] — logic done (the Settings toggle is already enabled for Items)
-- [ ] Prefire: queue your next shot(s) during the opponent's turn; fires when your turn starts [logic + ui] — logic done
-- [ ] Map size choice; larger maps get islands (no ships on them, torpedoes stop at them) [logic + ui] — logic done; UI still draws a 10×10 grid
-- [ ] Russian mode ("Морской бой"): 1×4, 2×3, 3×2, 4×1 ships, no touching, hit = shoot again (check other games for variants) [logic + ui] — logic done, playable now (4th mode button)
+- [x] Add Airstrike item [logic + ui] — item 4, cost 4, 5 cells on a diagonal; Rotate toggles ↘/↙
+- [x] "Extra shot after a hit" also available in Items mode [logic + ui]
+- [x] Prefire: queue your next shot(s) during the opponent's turn; fires when your turn starts [logic + ui]
+- [x] Map size choice; larger maps get islands (no ships on them, torpedoes stop at them) [logic + ui]
+- [x] Russian mode ("Морской бой"): 1×4, 2×3, 3×2, 4×1 ships, no touching, hit = shoot again (check other games for variants) [logic + ui]
 
 ## UI / UX
-- [ ] Torpedo UI cleaner [ui]
-- [ ] Toggles look better [ui]
-- [ ] Much clearer when it's your turn [ui]
-- [ ] Mobile battle fits one screen; scrolling only for extra details; minimap of your own fleet [ui]
-- [ ] Review every screen: clearer, simpler layout and selection; keep the design language [design → ui]
+- [x] Torpedo UI cleaner [ui]
+- [x] Toggles look better [ui]
+- [x] Much clearer when it's your turn [ui]
+- [x] Mobile battle fits one screen; scrolling only for extra details; minimap of your own fleet [ui]
+- [x] Review every screen: clearer, simpler layout and selection; keep the design language [design → ui]
+
+## UI notes (round 4)
+
+Where the UI differs from UX-SPEC.md, mostly to stay under 44 KB:
+- The host's rules are not saved in `localStorage` (§3, a proposal). There is no "Fleet details" link under the tally, because the lists are one short scroll below.
+- The prefire tip ("Tap a square to queue your next shot.") goes in the side panel, not the turn bar, so the bar keeps showing the last result. In Items mode it replaces the item hint for the whole of their turn.
+- The Map control also offers 8×8 (logic's Small size).
+- Board titles are hidden in landscape as well as portrait, because the board is sized to the full height.
+- There is no live-region message for "Firing queued shot E4". "Queued E4", "Removed E4" and "Queue cleared" are announced.
+- Labels on a receded board are not dimmed to 70%, because axe flags the contrast.
+- No stipple pattern on land.
 
 ## Logic API for UI
 

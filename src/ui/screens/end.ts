@@ -7,8 +7,9 @@ import { btn, label, settings, type Screen } from '../kit';
 import { cap, model } from './battle';
 
 export function end(ctrl: Controller): Screen {
-  const target = board('Their waters', false);
-  const own = board('Your fleet', true);
+  const g = (ctrl.state as { match: { geo: { n: number } } }).match.geo;
+  const target = board('Their waters', false, g.n);
+  const own = board('Your fleet', true, g.n);
   const head = h('div', 'end-head');
   const stats = h('dl', 'stats');
   const actions = h('div', 'end-actions');
@@ -58,8 +59,8 @@ export function end(ctrl: Controller): Screen {
     rematch.disabled = !open;
     const note = s.peerLeft ? 'Opponent left.' : r.me ? (host ? 'Waiting for opponent…' : !r.them && 'Waiting for host…') : r.them && 'Opponent wants a rematch.';
     actions.replaceChildren(
-      s.editing ? h('div', 'end-settings', settings(ctrl.config, (p) => ctrl.setConfig(p))) : '',
-      h('div', 'row-btns', rematch, host && open && btn(s.editing ? 'Done' : 'Change mode', () => ctrl.toggleEditing(), '', 'change-mode')),
+      s.editing ? h('div', 'end-settings', settings(ctrl)) : '',
+      h('div', 'row-btns', rematch, host && open && btn(s.editing ? 'Done' : 'Change mode', () => ctrl.toggleEditing(), '', 'change-mode'), h('button', { cls: 'textlink', onclick: () => ctrl.leave() }, 'Leave')),
       note ? h('p', { cls: 'status-line', id: 'rematch-note' }, note) : '',
     );
   };

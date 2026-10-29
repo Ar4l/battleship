@@ -9,7 +9,7 @@ const KB = 1000;
 // mode, Airstrike and prefire raised it, and the ceiling is now 44 KB. PLAN.md §12 has
 // the breakdown. The per-file numbers are guard rails with a little slack, so a small CSS
 // change doesn't fail a deploy while the total still fits.
-const BUDGET = { html: 5.2 * KB, entry: 21.5 * KB, trystero: 15.4 * KB, direct: 4.5 * KB, session: 41.6 * KB };
+const BUDGET = { html: 6.0 * KB, entry: 23.2 * KB, trystero: 15.4 * KB, direct: 4.5 * KB, session: 44 * KB };
 
 const files = [];
 const walk = (d) => readdirSync(d).forEach((f) => (statSync(join(d, f)).isDirectory() ? walk(join(d, f)) : files.push(join(d, f))));

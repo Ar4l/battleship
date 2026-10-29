@@ -6,8 +6,8 @@
   --rule: #c9cfd6;
   --known: #e3ebef;
   --signal: #d9480f;
+  --land: #e2d8c0;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --cell: clamp(24px, calc((min(100vw, 480px) - 64px) / 10), 40px);
   --gutter: 16px;
 }
 @media (prefers-color-scheme: dark) {
@@ -19,5 +19,6 @@
     --rule: #2a3a52;
     --known: #1b2e47;
     --signal: #ff6a1f;
+    --land: #2f3530;
   }
 }
