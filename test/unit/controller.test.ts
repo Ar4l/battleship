@@ -120,11 +120,11 @@ describe('controller over an in-memory transport', () => {
     const [me, them] = H.match!.phase === 'theirTurn' ? [H, G] : [G, H];
     them.prefire(50); // not their phase: ignored
     expect(them.queue).toEqual([]);
-    me.prefire(55);
-    me.prefire(44); // one shot without extra shot: a new pick swaps
-    expect(me.queue).toEqual([44]);
-    me.prefire(44);
-    expect(me.queue).toEqual([]);
+    for (const c of [55, 44, 33, 22, 11, 0]) me.prefire(c);
+    expect(me.queue).toEqual([55, 44, 33, 22, 11]); // up to 5
+    me.prefire(44); // tap again: removed
+    expect(me.queue).toEqual([55, 33, 22, 11]);
+    me.clearPrefire();
     me.prefire(66);
     them.attack({ k: 'fire', cells: [98] });
     await until(() => me.match!.phase === 'myTurn');
@@ -134,7 +134,24 @@ describe('controller over an in-memory transport', () => {
     expect(me.queue).toEqual([]);
   });
 
-  it('prefire with extra shot: up to 3, later ones fire only after hits, a move of my own cancels', async () => {
+  it('prefire without extra shot: one queued shot per turn, the rest carry over', async () => {
+    const { H, G } = await connect({});
+    await placeAndStart(H, G);
+    const [me, them] = H.match!.phase === 'theirTurn' ? [H, G] : [G, H];
+    const ships = shipCellsOf(me === H ? FLEET_B : FLEET_A);
+    const water = untargeted(me.match!).filter((c) => !ships.includes(c));
+    const mine = shipCellsOf(me === H ? FLEET_A : FLEET_B);
+    const sea = untargeted(them.match!).filter((c) => !mine.includes(c));
+    for (const c of water.slice(0, 3)) me.prefire(c);
+    for (let t = 0; t < 3; t++) {
+      them.attack({ k: 'fire', cells: [sea[t]!] });
+      await until(() => them.match!.phase === 'myTurn' && me.match!.phase === 'theirTurn', 5000);
+      expect(me.match!.target.shot.has(water[t]!)).toBe(true);
+      expect(me.queue).toEqual(water.slice(t + 1, 3));
+    }
+  });
+
+  it('prefire with extra shot: hits fire the next one, a miss leaves the rest for next turn, my own shot only removes its cell', async () => {
     const { H, G } = await connect({ extraShot: true });
     await placeAndStart(H, G);
     const [me, them] = H.match!.phase === 'theirTurn' ? [H, G] : [G, H];
@@ -144,27 +161,24 @@ describe('controller over an in-memory transport', () => {
     const mine = shipCellsOf(me === H ? FLEET_A : FLEET_B);
     const sea = untargeted(them.match!).filter((c) => !mine.includes(c));
     for (const c of [ships[0]!, ships[1]!, water[0]!, water[1]!]) me.prefire(c);
-    expect(me.queue).toEqual([ships[0], ships[1], water[0]]);
+    expect(me.queue).toEqual([ships[0], ships[1], water[0], water[1]]);
     them.attack({ k: 'fire', cells: [sea[0]!] });
-    // hit, hit, miss: all three fire, then the turn passes.
+    // hit, hit, miss: three fire, then the turn passes with one left over.
     await until(() => them.match!.phase === 'myTurn' && me.match!.phase === 'theirTurn', 5000);
     expect([ships[0]!, ships[1]!, water[0]!].every((c) => me.match!.target.shot.has(c))).toBe(true);
-    // Queue water first: the miss passes the turn and the rest is dropped.
-    me.prefire(water[2]!);
-    me.prefire(ships[2]!);
+    expect(me.queue).toEqual([water[1]]);
+    // The leftover fires next turn.
     them.attack({ k: 'fire', cells: [sea[1]!] });
     await until(() => them.match!.phase === 'myTurn' && me.match!.phase === 'theirTurn', 5000);
-    expect(me.match!.target.shot.has(ships[2]!)).toBe(false);
+    expect(me.match!.target.shot.has(water[1]!)).toBe(true);
     expect(me.queue).toEqual([]);
-    // A manual shot inside the 300 ms cancels the queue.
+    // A manual shot inside the 300 ms takes its own cell out; the rest stays queued.
     me.prefire(ships[3]!);
+    me.prefire(water[2]!);
     them.attack({ k: 'fire', cells: [sea[2]!] });
     await until(() => me.match!.phase === 'myTurn');
-    expect(me.attack({ k: 'fire', cells: [water[3]!] })).toBe(true);
-    expect(me.queue).toEqual([]);
-    await until(() => them.match!.phase === 'myTurn' && me.match!.phase === 'theirTurn');
-    await new Promise((r) => setTimeout(r, 350));
-    expect(me.match!.target.shot.has(ships[3]!)).toBe(false);
+    expect(me.attack({ k: 'fire', cells: [ships[3]!] })).toBe(true);
+    expect(me.queue).toEqual([water[2]]);
   });
 
   it('prefire in Salvo: up to my shots; too few become the selection; fired cells are dropped', async () => {

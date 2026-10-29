@@ -98,7 +98,7 @@ const short = (id: number) => ITEMS[id]!.name.split(' ')[0];
 /** Torpedo directions in Rotate order (clockwise), and the wire edge b for each. */
 const TORPEDO_DIRS = ['From left', 'From top', 'From right', 'From bottom'];
 const TORPEDO_B = [0, 2, 1, 3];
-const TIP = 'Tap a square to queue your next shot.';
+const TIP = 'Tap squares to queue shots.';
 /** Their turns seen this session: the prefire tip shows for the first two. */
 let theirTurns = 0;
 
@@ -363,7 +363,7 @@ export function battle(ctrl: Controller): Screen {
     stripSub.textContent = s.banner
       ? ''
       : my && q.length
-        ? 'Firing ' + qNames
+        ? 'Firing ' + (mm.config.turns ? qNames : cellName(q[0]!, n))
         : my && tapped && item !== null
           ? 'Tap again to fire' + (dn ? ', ' + dn.toLowerCase() : '')
           : theirTurn && q.length

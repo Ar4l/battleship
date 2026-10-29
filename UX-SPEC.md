@@ -183,8 +183,7 @@ This fixes the TODO item: the media query must not depend on width. Use `(orient
   - Nothing queued: "Tap a square to queue your next shot." Show this only for the first two their-turns of a session, then show the usual last result.
   - Queued: `Next: E4` (mono) followed by `Clear`. With several queued: `Next: E4, F4 · Clear`.
 - **How many cells can be queued:**
-  - Classic and Items: 1, or up to 3 when "Extra shot after a hit" is on. Later cells only fire if the earlier ones hit.
-  - Russian: up to 3, the same rule.
+  - One-shot turns (Classic, Items, Russian): up to 5. One fires each time you get a shot (turn start, and again after a hit when hits shoot again). Leftovers carry over to your next turn. A shot of your own only removes that cell from the queue; using an item clears it.
   - Salvo: up to the current shot count. If one of your ships sinks during their turn, drop the newest cells beyond the new count.
 - **At turn start**, the turn bar switches to "Your turn" and the context reads "Firing E4". After 300 ms the queued shot fires as a normal shot, with the normal animation. Salvo auto-fires only if the queue fills the salvo. Otherwise the queued cells become the current selection and the player finishes it.
 - Items cannot be queued. Picking an item during their turn does nothing (the item row is disabled then). Queuing a shot means you fire it instead of using an item. That is the player's choice, and it needs no warning.
