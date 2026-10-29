@@ -45,16 +45,22 @@ test('leave: closing the opponent page mid-battle shows "Your opponent left"', a
   await expect(A.locator('#notice')).toContainText('Your opponent left', { timeout: 15000 });
 });
 
-test('failed: an unreachable reply shows the failure notice and Retry returns home', async ({ browser }) => {
+test('failed: an unreachable reply says so after the wait, and Retry returns home', async ({ browser }) => {
   test.setTimeout(60_000);
   const A = await player(browser);
+  await A.clock.install();
   await hostLobby(A);
   await A.click('#use-direct');
   await expect(A.locator('#offer-link')).toBeVisible();
   const fake = await bs<string>(A, 'fakeAnswer');
   await A.fill('#paste', fake);
   await A.click('#connect');
-  await expect(A.locator('#notice')).toContainText("Couldn't connect — your network may be blocking peer-to-peer", { timeout: 20000 });
+  await expect(A.locator('main')).toContainText('Waiting for your friend to come back to the game');
+  // Their phone may still be in the messenger they sent the reply from: give it 90 s.
+  await A.clock.fastForward(60_000);
+  await expect(A.locator('#notice')).toBeHidden();
+  await A.clock.fastForward(31_000);
+  await expect(A.locator('#notice')).toContainText("Couldn't connect — your network may be blocking peer-to-peer");
   await A.click('#retry');
   await expect(A.locator('#create')).toBeVisible();
 });

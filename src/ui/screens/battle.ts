@@ -227,7 +227,7 @@ export function battle(ctrl: Controller): Screen {
               ? my
                 ? 'Fire a shot, or spend energy on an item.'
                 : 'You gain 1 energy each turn.'
-              : `${it.name}: ${it.desc.toLowerCase()}. ${armed !== null ? 'Tap again to fire.' : `Choose a target${dirName ? ', ' + dirName : ''}.`}`,
+              : `${it.name}: ${it.desc.toLowerCase()}. ${armed !== null ? 'Tap again to fire' : 'Choose a target'}${dirName ? ', ' + dirName : ''}.`,
           ),
           dirName && btn(item === 1 ? 'Direction' : 'Rotate', () => (dir++, render()), '', 'item-dir', 'rotate'),
           it && btn('Cancel', () => pick(null), 'quiet'),

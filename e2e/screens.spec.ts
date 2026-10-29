@@ -1,9 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
-import { bs, player, targetCell, waitTurn, playOut } from './util';
+import { bs, overflow, player, targetCell, waitTurn, playOut } from './util';
 
 const SIZES = [
-  { name: 'mobile', viewport: { width: 390, height: 844 } },
-  { name: 'desktop', viewport: { width: 1440, height: 900 } },
+  { name: 'mobile', viewport: { width: 390, height: 844 }, minCell: 24 },
+  // A phone on its side (iPhone 13/14 class): the board shrinks to fit the height.
+  { name: 'landscape', viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true, minCell: 20 },
+  { name: 'desktop', viewport: { width: 1440, height: 900 }, minCell: 24 },
 ];
 const SCHEMES = ['light', 'dark'] as const;
 const DIR = 'screenshots';
@@ -37,7 +39,8 @@ for (const size of SIZES)
   for (const scheme of SCHEMES)
     test(`screens ${size.name} ${scheme}`, async ({ browser }) => {
       test.setTimeout(120_000);
-      const opts = { viewport: size.viewport, colorScheme: scheme, reducedMotion: 'reduce' as const };
+      const { name: _, minCell, ...dev } = size;
+      const opts = { ...dev, colorScheme: scheme, reducedMotion: 'reduce' as const };
       const A = await player(browser, opts);
       const B = await player(browser, opts);
       const tag = `${size.name}-${scheme}`;
@@ -126,7 +129,7 @@ for (const size of SIZES)
       });
       expect(audit.bad).toEqual([]);
       expect(audit.scroll).toBeLessThanOrEqual(0);
-      expect(audit.cell).toBeGreaterThanOrEqual(24);
+      expect(audit.cell).toBeGreaterThanOrEqual(minCell);
       await A.keyboard.press('Escape');
       await shot(B, `08-battle-waiting-${tag}`);
       await B.click('#leave');
@@ -152,20 +155,11 @@ for (const size of SIZES)
       await shot(C, `11-notice-failed-${tag}`);
     });
 
-/** Pixels the page scrolls sideways, plus any element poking past the right edge. */
-const overflow = (p: Page) =>
-  p.evaluate(() => {
-    const out = [...document.querySelectorAll('body *')]
-      .filter((e) => e.getBoundingClientRect().right > innerWidth + 0.5)
-      .map((e) => `${e.tagName.toLowerCase()}.${e.className}`)
-      .slice(0, 5);
-    return { scroll: document.documentElement.scrollWidth - innerWidth, out };
-  });
 
-for (const width of [320, 360])
-  test(`no sideways scroll at ${width} px`, async ({ browser }) => {
+for (const [width, height] of [[320, 740], [360, 740], [750, 342], [863, 360]] as const)
+  test(`no sideways scroll at ${width}x${height}`, async ({ browser }) => {
     test.setTimeout(90_000);
-    const opts = { viewport: { width, height: 740 }, reducedMotion: 'reduce' as const, hasTouch: true };
+    const opts = { viewport: { width, height }, reducedMotion: 'reduce' as const, hasTouch: true, isMobile: true };
     const A = await player(browser, opts);
     const B = await player(browser, opts);
     const fits = async (p: Page, what: string) => expect(await overflow(p), what).toEqual({ scroll: 0, out: [] });

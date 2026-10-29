@@ -168,7 +168,8 @@ export function placement(ctrl: Controller): Screen {
       ov += capsule(sh, i, 'own' + (ghost?.i === i ? ' lifted' : '') + (i === sel && !me ? ' selected' : ''));
     });
     if (ghost) ov += capsule(ghost.ship, ghost.i, 'ghost' + (legal(ghost) ? '' : ' bad'));
-    b.update({ cls: [], labels: Array.from({ length: 100 }, (_, c) => cellName(c) + (occ[c] === undefined ? '' : ', ' + SHIP_NAMES[occ[c]!])), overlay: ov });
+    // Ship cells take the drag; water lets the page scroll and zoom (occ is sparse: water stays empty).
+    b.update({ cls: occ.map(() => (me ? '' : 'ship')), labels: Array.from({ length: 100 }, (_, c) => cellName(c) + (occ[c] === undefined ? '' : ', ' + SHIP_NAMES[occ[c]!])), overlay: ov });
     dockBtns.forEach((d, i) => {
       d.setAttribute('aria-pressed', String(i === sel));
       d.classList.toggle('lifted', ghost?.i === i);

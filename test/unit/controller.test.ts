@@ -263,4 +263,91 @@ describe('controller over an in-memory transport', () => {
     expect(H.match!.config.mode).toBe(1);
     expect(G.match!.config.mode).toBe(1);
   });
+
+  describe('a phone that locks or switches apps', () => {
+    type Raw = { t: { send(u: Uint8Array): void; end(r: string): void; onstate?: ((up: boolean) => void) | null } };
+    const tr = (c: Controller) => (c as unknown as Raw).t;
+    const away = async (c: Controller, ms: number) => {
+      c.visibility(true);
+      vi.advanceTimersByTime(ms);
+      c.visibility(false);
+      await new Promise((r) => setTimeout(r, 5));
+    };
+
+    it('back after 10 s: a live link answers the ping and the game goes on', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        const { H, G } = await connect({});
+        await placeAndStart(H, G);
+        const sent: string[] = [];
+        const send = tr(G).send;
+        tr(G).send = (u) => (sent.push(decode(u)!.t), send(u));
+        await away(G, 12_000);
+        expect(sent).toEqual(['ping']);
+        vi.advanceTimersByTime(3_000);
+        expect(G.state.s).toBe('battle');
+        expect(H.state.s).toBe('battle');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('a short switch sends no ping', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        const { H, G } = await connect({});
+        const sent: string[] = [];
+        const send = tr(G).send;
+        tr(G).send = (u) => (sent.push(decode(u)!.t), send(u));
+        await away(G, 4_000);
+        expect(sent).toEqual([]);
+        expect(H.state.s).toBe('placement');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('back after 10 s with a dead link: "lost while in the background", no forfeit claim; the opponent hears BYE', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        const { H, G } = await connect({});
+        await placeAndStart(H, G);
+        tr(H).send = () => {};
+        await away(G, 15_000);
+        vi.advanceTimersByTime(3_000);
+        expect(G.state).toMatchObject({ s: 'notice', kind: 'away' });
+        await until(() => H.state.s === 'notice');
+        expect(H.state).toMatchObject({ s: 'notice', kind: 'left', detail: 'battle' });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('the link closing while the page is hidden reads as "away" here and "left" there', async () => {
+      const { H, G } = await connect({});
+      await placeAndStart(H, G);
+      G.visibility(true);
+      tr(G).end('failed');
+      expect(G.state).toMatchObject({ s: 'notice', kind: 'away' });
+      await until(() => H.state.s === 'notice');
+      expect(H.state).toMatchObject({ s: 'notice', kind: 'left', detail: 'battle' });
+    });
+
+    it('a BYE while hidden is still "left": they quit on purpose', async () => {
+      const { H, G } = await connect({});
+      G.visibility(true);
+      H.leave();
+      await until(() => G.state.s === 'notice');
+      expect(G.state).toMatchObject({ s: 'notice', kind: 'left' });
+    });
+
+    it('a dropped link shows as lost until it comes back', async () => {
+      const { H } = await connect({});
+      const seen: boolean[] = [];
+      H.subscribe(() => seen.push(H.lost));
+      tr(H).onstate!(false);
+      tr(H).onstate!(true);
+      expect(seen).toEqual([true, false]);
+    });
+  });
 });

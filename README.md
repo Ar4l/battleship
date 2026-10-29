@@ -23,6 +23,8 @@ npm run check      # everything above
 
 The Trystero e2e spec (`@net`) skips itself when no WebTorrent tracker is reachable. Set `NET=0` to exclude it.
 
+`e2e/mobile.spec.ts` plays whole games with touch taps on emulated phones (iPhone 13, Pixel 7, both in landscape) in Chromium. `WEBKIT=1` adds a `webkit` project for Safari's engine (`e2e/webkit.spec.ts`; needs `npx playwright install --with-deps webkit`). Two WebKit pages can't reach each other over WebRTC on Linux (mDNS-only host candidates), so it tests single pages there and plays one game with a Chromium host, which CI skips.
+
 ## Layout
 
 - `src/game/` rules, items, engine, commit-reveal and verification. Pure, no DOM.
@@ -37,8 +39,9 @@ Signalling uses Trystero's **torrent** strategy (`@trystero-p2p/torrent@0.26.0`,
 
 - **Joining.** Each side creates channel 512 on its own schedule, and a message sent before the other side has created it is dropped. Both sides repeat HELLO every 250 ms until they hear anything, and the guest answers every HELLO. If no game starts within 6 s of the channel opening, the player sees the "Couldn't connect" notice and the room is released.
 - **Trackers go quiet after connecting.** The guest closes every tracker socket and pauses reconnects. The host keeps one socket so a third player still gets "room full". If that one socket drops during the match it is not reopened (reconnects are paused), so a third player then sees "Still looking for game …" instead of "room full". The game itself is not affected. Measured over 90 s of an idle battle: the guest sends and receives nothing; the host sends about 2.4 KB and receives 0.2 KB (about 100 KB an hour). Before this change it was 10 to 16 KB per player in the same 90 s.
-- **Short drop-outs.** A phone that switches to another app for a moment stops answering. Trystero would drop the peer 5 s after the connection goes `disconnected`; the build patches that to 25 s so the game's own 20 s rule decides. In practice Chromium declares the connection failed about 16 s after the other side goes silent, so a pause of up to about 15 s keeps the game (e2e: a guest frozen with SIGSTOP for 13 s).
-- **Trimmed Trystero.** `vite.config.ts` swaps three Trystero modules for small versions in `build/trystero/` and drops the unused room-password challenge (and fails the build on any other Trystero version): no media, no public actions, and a one-frame JSON wire for Trystero's internal messages. This takes the Trystero chunk from 22.0 KB to 15.6 KB gzipped. Both peers must run this build. See `build/trystero/README.md`, and re-check it when upgrading Trystero.
+- **Short drop-outs.** A phone that switches to another app for a moment stops answering. Trystero would drop the peer 5 s after the connection goes `disconnected`; the build patches that to 25 s so the game's own 20 s rule decides. In practice Chromium declares the connection failed about 16 s after the other side goes silent, so a pause of up to about 15 s keeps the game (e2e: a guest frozen with SIGSTOP for 13 s). Meanwhile both screens say the connection is lost. A page that comes back after 10 s or more checks the link with a 1-byte PING, and if the link died it says "Connection lost while Battleship was in the background" rather than claiming a forfeit win. A screen wake lock keeps the phone from locking during a game.
+- **Direct link from a phone.** The guest sends the reply from a messenger, so their browser is usually suspended when the host pastes it. The host waits 90 s and treats an early ICE failure as recoverable: ICE reconnects within a second of the guest coming back.
+- **Trimmed Trystero.** `vite.config.ts` swaps three Trystero modules for small versions in `build/trystero/`, patches two more, and drops the unused room-password challenge (and fails the build on any other Trystero version): no media, no public actions, and a one-frame JSON wire for Trystero's internal messages. It also drops Trystero's per-room stream and track bookkeeping. This takes the Trystero chunk from 22.0 KB to 15.3 KB gzipped. Both peers must run this build. See `build/trystero/README.md`, and re-check it when upgrading Trystero.
 
 ## Size
 
@@ -46,9 +49,9 @@ Signalling uses Trystero's **torrent** strategy (`@trystero-p2p/torrent@0.26.0`,
 
 | What | gzip |
 |---|---|
-| `index.html` with inlined CSS | 5.0 KB |
-| app entry (game, UI, Trystero room code) | 18.7 KB |
-| Trystero chunk, loaded on intent (Create focus/hover, first code digit, `#NNNN` link) | 15.6 KB |
-| **Code game: everything downloaded** | **39.4 KB** (budget 40) |
-| Direct-link game instead | 27.5 KB |
-| First load before any click | 23.7 KB |
+| `index.html` with inlined CSS | 5.1 KB |
+| app entry (game, UI, Trystero room code) | 19.3 KB |
+| Trystero chunk, loaded on intent (Create focus/hover, first code digit, `#NNNN` link) | 15.3 KB |
+| **Code game: everything downloaded** | **39.7 KB** (budget 40) |
+| Direct-link game instead | 28.3 KB |
+| First load before any click | 24.4 KB |

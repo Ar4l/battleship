@@ -36,7 +36,11 @@ export function directHost(ctrl: Controller): Screen {
       );
     built = true;
     err.textContent = s.error ?? '';
-    note.textContent = s.connecting ? 'Connecting…' : '';
+    note.textContent = s.connecting
+      ? s.connecting > 1
+        ? 'Still trying. Make sure your friend is back in the game. If nothing happens, your network may be blocking peer-to-peer.'
+        : 'Waiting for your friend to come back to the game…'
+      : '';
   };
   update();
   return { el, update };
@@ -56,7 +60,7 @@ export function directGuest(ctrl: Controller): Screen {
         'ol',
         'steps',
         step(1, 'Send this reply link back', ...share(gameUrl('a=' + blob), 'answer'), h('p', 'small muted', 'Or copy just the code:'), linkBox(blob, 'answer-code', 'small'), copyBtn(() => blob, 'Copy code')),
-        step(2, 'Your friend opens it', status('Waiting for your friend to connect…')),
+        step(2, 'Come back to this page', h('p', 'small muted', 'Keep it open. The game starts when your friend opens your reply.'), status('Waiting for your friend…')),
       ),
       btn('Cancel', () => ctrl.leave(), 'quiet'),
     );

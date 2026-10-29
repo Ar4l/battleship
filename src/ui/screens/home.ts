@@ -21,7 +21,7 @@ const chart = () => {
 };
 
 export function home(ctrl: Controller, prefill = ''): Screen {
-  const input = h('input', { id: 'code', cls: 'code-input', inputmode: 'numeric', maxlength: 4, autocomplete: 'off', 'aria-label': '4-digit game code', value: prefill });
+  const input = h('input', { id: 'code', cls: 'code-input', inputmode: 'numeric', autocomplete: 'off', 'aria-label': '4-digit game code', value: prefill });
   const err = h('p', { cls: 'small error', role: 'alert' });
   const submit = () => {
     const v = input.value;
@@ -42,6 +42,8 @@ export function home(ctrl: Controller, prefill = ''): Screen {
     if (v.length === 4) submit();
   });
   input.addEventListener('keydown', (e) => e.key === 'Enter' && submit());
+  // The input is invisible: keep the caret at the end so Backspace deletes the last digit.
+  input.onfocus = input.onclick = () => input.setSelectionRange(4, 4);
   paint();
   const create = btn('Create game', () => ctrl.createGame(), 'primary wide', 'create');
   for (const ev of ['pointerenter', 'touchstart', 'focus']) create.addEventListener(ev, () => void prefetch(), { once: true, passive: true });

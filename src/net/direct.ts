@@ -24,7 +24,8 @@ function gather(pc: RTCPeerConnection, capMs = 3500): Promise<void> {
   });
 }
 
-function openOrFail(pc: RTCPeerConnection, dc: RTCDataChannel): { open: Promise<Transport>; arm: (ms: number) => void } {
+/** `open` rejects only when the armed timer runs out; `onFail` hears ICE failures meanwhile. */
+function openOrFail(pc: RTCPeerConnection, dc: RTCDataChannel, onFail?: () => void): { open: Promise<Transport>; arm: (ms: number) => void } {
   let timer = 0;
   let reject!: (e: Error) => void;
   const open = new Promise<Transport>((res, rej) => {
@@ -34,9 +35,7 @@ function openOrFail(pc: RTCPeerConnection, dc: RTCDataChannel): { open: Promise<
       res(t);
     });
   });
-  pc.addEventListener('connectionstatechange', () => {
-    if (pc.connectionState === 'failed') reject(new DirectError('failed'));
-  });
+  pc.addEventListener('connectionstatechange', () => pc.connectionState === 'failed' && onFail?.());
   return {
     open,
     arm: (ms) => {
@@ -53,6 +52,8 @@ export interface DirectHost {
   blob: string;
   /** Apply the guest's answer (full #a= link or bare blob). Throws DirectError on malformed input. */
   accept(answer: string): Promise<void>;
+  /** Called when ICE fails while waiting (it may still recover). */
+  onFail: (() => void) | null;
   transport: Promise<Transport>;
   close(): void;
 }
@@ -65,16 +66,17 @@ const blobFrom = (s: string): string => {
 async function createDirectHost(): Promise<DirectHost> {
   const pc = new RTCPeerConnection({ iceServers: STUN });
   const dc = gameChannel(pc);
-  const { open, arm } = openOrFail(pc, dc);
+  const { open, arm } = openOrFail(pc, dc, () => h.onFail?.());
   open.catch(() => {});
   await pc.setLocalDescription(await pc.createOffer());
   await gather(pc);
   const blob = packSdp(pc.localDescription!.sdp, 'offer');
   if (!blob) throw new DirectError('pack');
   let accepted = false;
-  return {
+  const h: DirectHost = {
     blob,
     transport: open,
+    onFail: null,
     close: () => pc.close(),
     async accept(answer) {
       if (accepted) return;
@@ -83,9 +85,12 @@ async function createDirectHost(): Promise<DirectHost> {
       // Only lock once the answer is applied, so a bad paste can be corrected.
       await pc.setRemoteDescription(desc);
       accepted = true;
-      arm(15000);
+      // The guest may still be in the messenger they sent the reply from, with their
+      // browser suspended until they come back.
+      arm(90000);
     },
   };
+  return h;
 }
 
 export interface DirectGuest {
@@ -104,7 +109,7 @@ async function createDirectGuest(offer: string): Promise<DirectGuest | null> {
   open.catch(() => {});
   // The guest's ICE starts checking as soon as it has the offer (the host's agent
   // answers STUN before it has our answer), so there is no signal for "host pasted".
-  // The reply travels by messenger: wait long, rely on connectionState 'failed'.
+  // The reply travels by messenger, and ICE failures may recover (see fromChannel): wait long.
   arm(300000);
   await pc.setRemoteDescription(desc);
   await pc.setLocalDescription(await pc.createAnswer());
@@ -124,9 +129,10 @@ export async function host(c: Controller): Promise<void> {
     if (c.state.s !== 'direct-host') return h.close();
     c.accept = (a) =>
       void h.accept(a).then(
-        () => c.patch('direct-host', { connecting: true, error: undefined }),
+        () => c.patch('direct-host', { connecting: 1, error: undefined }),
         () => c.patch('direct-host', { error: 'That link looks incomplete. Ask for it again.' }),
       );
+    h.onFail = () => c.patch('direct-host', { connecting: 2 });
     c.closers.push(h.close, listenForAnswers((b) => c.accept?.(b)));
     c.set({ s: 'direct-host', blob: h.blob });
     c.link(h.transport);

@@ -2,7 +2,7 @@ import { decodeFleet, decodeShip, encodeFleet, encodeShip } from '../game/board'
 import { decodeConfig, encodeConfig } from '../game/rules';
 import type { Config, Entry, Fleet, ItemId } from '../game/types';
 
-export const PROTO_VERSION = 1;
+export const PROTO_VERSION = 2;
 
 export type Msg =
   | { t: 'hello'; ver: number; role: 0 | 1 }
@@ -16,10 +16,12 @@ export type Msg =
   | { t: 'reveal'; salt: Uint8Array; fleet: Fleet }
   | { t: 'verdict'; ok: boolean }
   | { t: 'rematch'; config?: Config }
-  | { t: 'bye' };
+  | { t: 'bye' }
+  | { t: 'ping' }
+  | { t: 'pong' };
 
 /** Opcode per message type; one byte, then the body. */
-const OP = { hello: 1, config: 2, ready: 3, coin: 4, fire: 16, answer: 17, use: 18, sonar: 19, reveal: 32, verdict: 33, rematch: 48, bye: 49 } as const;
+const OP = { hello: 1, config: 2, ready: 3, coin: 4, fire: 16, answer: 17, use: 18, sonar: 19, reveal: 32, verdict: 33, rematch: 48, bye: 49, ping: 50, pong: 51 } as const;
 
 export function encode(m: Msg): Uint8Array {
   const body: ArrayLike<number>[] =
@@ -79,7 +81,9 @@ export function decode(u: Uint8Array): Msg | null {
     case OP.rematch:
       return n === 1 ? { t: 'rematch' } : config && { t: 'rematch', config };
     case OP.bye:
-      return n === 1 ? { t: 'bye' } : null;
+    case OP.ping:
+    case OP.pong:
+      return n === 1 ? { t: (['bye', 'ping', 'pong'] as const)[op - OP.bye]! } : null;
   }
   return null;
 }

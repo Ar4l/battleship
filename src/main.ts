@@ -39,3 +39,22 @@ addEventListener('hashchange', route);
 // Once connected, a #NNNN link has done its job; reopening the tab later must not join a stranger's game.
 ctrl.subscribe(() => ctrl.state.s === 'placement' && location.hash && clearHash());
 addEventListener('pagehide', () => ctrl.state.s !== 'home' && ctrl.leave());
+
+// Keep the screen on while a game is set up or played: a phone that locks suspends
+// the page and the link drops. Browsers release the lock whenever the page is hidden.
+let lock: Promise<WakeLockSentinel | void> | undefined;
+const wake = () => {
+  const s = ctrl.state;
+  // Not on home, notice or forwarded.
+  const on = !document.hidden && (s.s === 'end' ? !s.peerLeft : !/^[hnf]/.test(s.s));
+  if (on && !lock) lock = navigator.wakeLock?.request('screen').catch(() => {});
+  else if (!on && lock) {
+    void lock.then((l) => l?.release());
+    lock = undefined;
+  }
+};
+ctrl.subscribe(wake);
+document.addEventListener('visibilitychange', () => {
+  ctrl.visibility(document.hidden);
+  wake();
+});

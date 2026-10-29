@@ -2,6 +2,8 @@ import { defineConfig, devices } from '@playwright/test';
 
 // The @net Trystero spec self-skips when no tracker is reachable; NET=0 excludes it.
 const NO_NET = process.env.NET === '0';
+// WEBKIT=1 adds the Safari-engine project (needs `npx playwright install --with-deps webkit`).
+const WEBKIT = !!process.env.WEBKIT;
 
 export default defineConfig({
   testDir: 'e2e',
@@ -26,11 +28,13 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
+      testIgnore: /webkit\.spec/,
       use: {
         ...devices['Desktop Chrome'],
         // Real host candidates so two contexts can reach each other without mDNS.
         launchOptions: { args: ['--disable-features=WebRtcHideLocalIpsWithMdns'] },
       },
     },
+    ...(WEBKIT ? [{ name: 'webkit', testMatch: /webkit\.spec/, use: { ...devices['iPhone 13'] } }] : []),
   ],
 });

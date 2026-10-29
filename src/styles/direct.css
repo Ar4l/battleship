@@ -7,7 +7,7 @@
   background: var(--water);
   width: 0;
   flex: 1;
-  font-size: 14px;
+  font-size: 16px;
 }
 .linkbox.small {
   font-size: 12px;

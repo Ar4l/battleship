@@ -62,6 +62,12 @@ export class Controller {
   lastCode = 0;
   private readying = false;
   private timedOut = false;
+  /** The link to the opponent dropped and may come back. */
+  lost = false;
+  /** When the page was last hidden, when it last came back, and when a frame last arrived (ms). */
+  private hiddenAt = 0;
+  private shownAt = 0;
+  private heard = 0;
 
   constructor(private net: NetDeps = {}) {
     this.fleet = randomFleet(false, this.rng);
@@ -107,6 +113,7 @@ export class Controller {
     this.accept = null;
     this.deadline = 0;
     this.role = role;
+    this.lost = false;
   }
 
   private room(role: 'host' | 'guest', code: number): void {
@@ -181,6 +188,10 @@ export class Controller {
     this.gotHello = this.gotFrame = false;
     t.onmessage = (u8) => this.onFrame(u8);
     t.onclose = () => this.peerGone();
+    t.onstate = (up) => {
+      this.lost = !up;
+      this.emit();
+    };
     // Each side creates channel 512 on its own schedule, and a message sent
     // before the other side has created it is dropped. Repeat HELLO until
     // anything arrives; give up if the game never starts.
@@ -220,10 +231,31 @@ export class Controller {
     this.set({ s: 'notice', kind: 'left', detail: 'stalled' });
   }
 
-  private peerGone(): void {
+  /**
+   * The page was hidden or shown (main.ts). A phone that locks or switches apps
+   * suspends the page and the link can die meanwhile: after 10 s away mid-game,
+   * check it with a ping.
+   */
+  visibility(hidden: boolean): void {
+    const now = Date.now();
+    if (hidden) return void (this.hiddenAt = now);
+    if (this.hiddenAt <= this.shownAt) return;
+    this.shownAt = now;
+    const s = this.state.s;
+    if (now - this.hiddenAt < 10000 || (s !== 'placement' && s !== 'battle')) return;
+    this.send({ t: 'ping' });
+    // No answer: the link died while we were away. Tell the opponent in case it is only slow.
+    this.timer('ping', 3000, () => this.heard < now && (this.send({ t: 'bye' }), this.notice('away')));
+  }
+
+  /** `bye`: they left on purpose. */
+  private peerGone(bye = false): void {
     this.t = null;
     const s = this.state;
-    if (s.s !== 'end') return this.notice('left', s.s === 'battle' ? 'battle' : undefined);
+    // The link died while this page was in the background or had just come back from it:
+    // most likely we were the ones who dropped out, so don't claim a forfeit win.
+    const away = !bye && (this.hiddenAt > this.shownAt || Date.now() - this.shownAt < 30000);
+    if (s.s !== 'end') return this.notice(away ? 'away' : 'left', s.s === 'battle' ? 'battle' : undefined);
     this.teardown();
     this.set({ ...s, peerLeft: true, ...(s.verdict === 'pending' && { verdict: 'unverified', reason: UNVERIFIED }) });
   }
@@ -384,7 +416,10 @@ export class Controller {
     const s = this.state;
     if (!m) return s.s === 'battle' ? this.cheat('they sent an invalid message') : undefined;
     this.gotFrame = true;
+    this.heard = Date.now();
     switch (m.t) {
+      case 'ping':
+        return this.send({ t: 'pong' });
       case 'hello':
         if (m.ver !== PROTO_VERSION) return this.notice('version');
         // The guest answers every HELLO, so the host hears one even if the guest's own were dropped.
@@ -433,7 +468,7 @@ export class Controller {
         return s.rematch.me ? this.toPlacement() : this.emit();
       case 'bye':
         this.t?.close();
-        return this.peerGone();
+        return this.peerGone(true);
     }
   }
 

@@ -90,8 +90,8 @@ export async function waitTurn(A: Page, B: Page): Promise<Page | null> {
 
 export const targetCell = (p: Page, i: number) => p.locator(`.a-target .cell[data-i="${i}"]`);
 
-/** Play until the end: `winner` fires at the loser's ships, the loser fires at water. */
-export async function playOut(A: Page, B: Page, winner: Page, mode: 'classic' | 'salvo' = 'classic'): Promise<void> {
+/** Play until the end: `winner` fires at the loser's ships, the loser fires at water. `tap`: touch taps, not clicks. */
+export async function playOut(A: Page, B: Page, winner: Page, mode: 'classic' | 'salvo' = 'classic', tap = false): Promise<void> {
   const fleets = new Map<Page, number[]>([
     [A, fleetCells(await bs<Fleet>(A, 'myFleet'))],
     [B, fleetCells(await bs<Fleet>(B, 'myFleet'))],
@@ -109,9 +109,75 @@ export async function playOut(A: Page, B: Page, winner: Page, mode: 'classic' | 
         const s = (window as unknown as { __bs: { state(): { match: { own: { sunk: unknown[] }; target: { shot: Set<number> } } } } }).__bs.state().match;
         return Math.min(5 - s.own.sunk.filter(Boolean).length, 100 - s.target.shot.size);
       });
-      for (const c of pool.slice(0, n)) await targetCell(p, c).click();
-      await p.click('#fire');
-    } else await targetCell(p, pool[0]!).click();
+      for (const c of pool.slice(0, n)) await (tap ? targetCell(p, c).tap() : targetCell(p, c).click());
+      await (tap ? p.locator('#fire').tap() : p.click('#fire'));
+    } else await (tap ? targetCell(p, pool[0]!).tap() : targetCell(p, pool[0]!).click());
     await expect.poll(() => p.evaluate(() => (window as unknown as { __bs: { state(): { match?: { phase: string } } } }).__bs.state().match?.phase)).not.toBe('awaitingAnswer');
   }
 }
+
+/** Pixels the page scrolls sideways, plus any element poking past the right edge. */
+export const overflow = (p: Page) =>
+  p.evaluate(() => {
+    const out = [...document.querySelectorAll('body *')]
+      .filter((e) => e.getBoundingClientRect().right > innerWidth + 0.5)
+      .map((e) => `${e.tagName.toLowerCase()}.${e.className}`)
+      .slice(0, 5);
+    return { scroll: document.documentElement.scrollWidth - innerWidth, out };
+  });
+
+/**
+ * Record what the page asks of the platform: wake lock requests and releases in
+ * window.__wl, and an AudioContext that, like iOS Safari, only starts when resume()
+ * runs inside touchend, pointerup, click or keydown (window.__ac).
+ */
+export const stubPlatform = (p: Page) =>
+  p.addInitScript(() => {
+    const w = window as unknown as Record<string, unknown>;
+    const wl: string[] = (w.__wl = []);
+    Object.defineProperty(navigator, 'wakeLock', {
+      value: { request: async () => (wl.push('request'), { release: async () => void wl.push('release') }) },
+    });
+    const node = () => ({ gain: { value: 0, setValueAtTime() {}, exponentialRampToValueAtTime() {} }, frequency: { value: 0, setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect: (n: unknown) => n, start() {}, stop() {} });
+    class FakeAudio {
+      state = 'suspended';
+      onstatechange: (() => void) | null = null;
+      currentTime = 0;
+      sampleRate = 8000;
+      destination = {};
+      resumedIn: string[] = [];
+      ran = false;
+      constructor() {
+        w.__ac = this;
+      }
+      to(s: string) {
+        this.state = s;
+        this.ran ||= s === 'running';
+        this.onstatechange?.();
+      }
+      resume() {
+        const ev = window.event?.type ?? 'none';
+        this.resumedIn.push(ev);
+        if (['touchend', 'pointerup', 'click', 'keydown'].includes(ev) && this.state !== 'running') this.to('running');
+        return Promise.resolve();
+      }
+      suspend() {
+        this.to('suspended');
+        return Promise.resolve();
+      }
+      createGain = node;
+      createOscillator = node;
+      createBiquadFilter = node;
+      createBufferSource = node;
+      createBuffer = () => ({ getChannelData: () => new Float32Array(1) });
+    }
+    w.AudioContext = FakeAudio;
+  });
+
+/** Pretend the page went to the background (or came back): document.hidden plus the event. */
+export const setHidden = (p: Page, hidden: boolean) =>
+  p.evaluate((hidden) => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (hidden ? 'hidden' : 'visible') });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }, hidden);

@@ -13,7 +13,7 @@ function inlineCss(): Plugin {
       order: 'post',
       handler(html, ctx) {
         if (!ctx.bundle) return html;
-        html = html.replace(/>\s+</g, '><').trim();
+        html = html.replace(/>\s+</g, '><').replace(/ \/>/g, '>').trim();
         for (const [name, chunk] of Object.entries(ctx.bundle)) {
           if (chunk.type !== 'asset' || !name.endsWith('.css')) continue;
           const re = new RegExp(`<link[^>]+href="[^"]*${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[^>]*>`);
@@ -52,6 +52,9 @@ function trimTrystero(): Plugin {
     // Trystero drops a peer 5 s after 'disconnected'. Wait longer than our own 20 s
     // grace (transport.ts) so a phone that is briefly backgrounded keeps the game.
     ['peer', /const disconnectedCloseDelayMs = 5e3;/, 'const disconnectedCloseDelayMs = 25e3;'],
+    // No audio or video (media.mjs is stubbed): drop the per-room stream and track bookkeeping.
+    ['shared-peer', /\t\t\taddStream: \(stream\) => \{[^]*?(?=\t\t\t__trysteroMedia: shared\.media\n)/, ''],
+    ['shared-peer', /\treleaseStreamOwner\(shared[^]*?\n\tpruneRoomOwnership\(shared, roomIdToRemove\) \{[^]*?\n\t\}\n/, '\tpruneRoomOwnership() {}\n'],
   ];
   const applied = new Set<string>();
   return {
@@ -61,7 +64,7 @@ function trimTrystero(): Plugin {
       return m ? readFileSync(dir + m[1] + '.mjs', 'utf8') : undefined;
     },
     transform(code, id) {
-      const m = /@trystero-p2p[\\/]core[\\/]dist[\\/](\w+)\.mjs$/.exec(id);
+      const m = /@trystero-p2p[\\/]core[\\/]dist[\\/]([\w-]+)\.mjs$/.exec(id);
       let out = code;
       for (const [file, re, to] of patches) {
         if (m?.[1] !== file) continue;

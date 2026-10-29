@@ -24,6 +24,8 @@ describe('codec', () => {
     [{ t: 'rematch' }, 1],
     [{ t: 'rematch', config: { mode: 0, extraShot: true, noTouch: false, timer: 15 } }, 4],
     [{ t: 'bye' }, 1],
+    [{ t: 'ping' }, 1],
+    [{ t: 'pong' }, 1],
   ];
   it.each(msgs)('round-trips %j with exact length', (m, len) => {
     const u = encode(m);
@@ -51,6 +53,8 @@ describe('codec', () => {
       [0x21, 2],
       [0x30, 1],
       [0x31, 0],
+      [0x32, 0],
+      [0x33, 1],
       new Array(66).fill(0x11),
     ];
     for (const b of bad) expect(decode(Uint8Array.from(b)), JSON.stringify(b)).toBeNull();

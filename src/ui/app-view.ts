@@ -3,14 +3,14 @@ import { rulesLine } from '../game/rules';
 import { announce, mountAnnouncer } from './announce';
 import { h } from './h';
 import { icon } from './icons';
-import type { Screen } from './kit';
+import { blink, type Screen } from './kit';
 import { battle } from './screens/battle';
 import { end } from './screens/end';
 import { home, mark } from './screens/home';
 import { lobbyGuest, lobbyHost } from './screens/lobby';
 import { notice } from './screens/notice';
 import { placement } from './screens/placement';
-import { isMuted, play, setMuted, unlockAudio } from './sound';
+import { armAudio, isMuted, play, setMuted, unlockAudio } from './sound';
 
 type Direct = typeof import('./screens/direct');
 let direct: Direct | null = null;
@@ -45,16 +45,17 @@ export function mountApp(root: HTMLElement, ctrl: Controller): void {
     'top',
     h('div', 'brand', mark(), h('span', null, 'Battleship')),
     meta,
-    h('p', 'ask', 'Leave this game?'),
+    h('p', 'ask', 'Leave game?'),
     yes,
     stay,
     leave,
     mute,
   );
   const main = h('main', { id: 'main' });
-  root.replaceChildren(header, main);
+  const lost = h('p', { cls: 'status-line lost', id: 'lost', role: 'status' }, blink(), 'Connection lost. Waiting for your opponent…');
+  root.replaceChildren(header, lost, main);
   mountAnnouncer(root);
-  for (const ev of ['pointerdown', 'keydown']) document.addEventListener(ev, unlockAudio, { once: true, capture: true });
+  armAudio();
   ctrl.onSfx = play;
   ctrl.onAnnounce = announce;
 
@@ -91,6 +92,7 @@ export function mountApp(root: HTMLElement, ctrl: Controller): void {
     const inGame = live() || s.s === 'end';
     header.classList.toggle('is-home', s.s === 'home');
     leave.hidden = !inGame;
+    lost.hidden = !(ctrl.lost && live());
     meta.textContent = inGame ? rulesLine(ctrl.config) : '';
   };
   ctrl.subscribe(render);

@@ -28,11 +28,12 @@ jobs:
       - run: npx vitest run
       - run: npx vite build
       - run: node scripts/size.mjs
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps chromium webkit
       - run: npx playwright test
         env:
           CI: '1'
           NET: '0'
+          WEBKIT: '1'
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

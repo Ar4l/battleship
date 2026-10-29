@@ -2,7 +2,7 @@
 
 `vite.config.ts` loads these files in place of modules of `@trystero-p2p/core@0.26.0`
 (pinned exactly in package.json). They remove code this game never runs: the Trystero chunk goes
-from 22.0 KB to 15.6 KB gzipped. Relative imports resolve against the original module's folder.
+from 22.0 KB to 15.3 KB gzipped. Relative imports resolve against the original module's folder.
 
 - `media.mjs`: the game sends no audio or video. Every media method is a no-op.
 - `actions.mjs`: no public `room.makeAction` (the game talks over its own data channel).
@@ -14,6 +14,9 @@ from 22.0 KB to 15.6 KB gzipped. Relative imports resolve against the original m
   patched text is not found.
 - `peer.mjs` is patched in place too: `disconnectedCloseDelayMs` goes from 5 s to 25 s, so a
   briefly backgrounded phone isn't dropped before the game's own 20 s grace (src/net/transport.ts).
+- `shared-peer.mjs` is patched in place as well: the per-room stream and track ownership
+  (`addStream`, `addTrack`, `replaceTrack` and their release helpers) goes, because only the
+  stubbed media manager would call it.
 - The build also fails unless `@trystero-p2p/core` is exactly 0.26.0, so an upgrade can't
   silently pair new modules with these stale copies.
 

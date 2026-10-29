@@ -6,32 +6,47 @@ let idle = 0;
 /** Suspend the audio thread 2 s after the last sound (battery on phones). */
 const rest = () => {
   clearTimeout(idle);
-  idle = window.setTimeout(() => void ctx?.suspend(), 2000);
+  idle = window.setTimeout(() => ctx?.suspend().catch(() => {}), 2000);
 };
-const get = (): Storage | null => {
-  try {
-    return localStorage;
-  } catch {
-    return null;
-  }
-};
-let muted = get()?.getItem('bs:mute') === '1';
+let muted = false;
+try {
+  muted = localStorage.getItem('bs:mute') === '1';
+} catch {
+  /* storage blocked */
+}
 
 export const isMuted = (): boolean => muted;
 export function setMuted(m: boolean): void {
   muted = m;
-  get()?.setItem('bs:mute', m ? '1' : '0');
+  try {
+    localStorage.setItem('bs:mute', m ? '1' : '0');
+  } catch {
+    /* storage blocked or full */
+  }
 }
 
-/** Create the AudioContext lazily on the first user gesture. */
+// iOS only lets audio start from touchend, pointerup, click or keydown (not touchstart
+// or a touch pointerdown), so listen to all of them until the context is running.
+const GESTURES = ['pointerup', 'touchend', 'click', 'keydown'];
+const listen = (on: boolean) => GESTURES.forEach((e) => document[on ? 'addEventListener' : 'removeEventListener'](e, unlockAudio, { capture: true, passive: true }));
+
+/** Create or resume the AudioContext; call from a user gesture. */
 export function unlockAudio(): void {
-  if (ctx || typeof AudioContext === 'undefined') return;
-  ctx = new AudioContext();
-  out = ctx.createGain();
-  out.gain.value = 0.25;
-  out.connect(ctx.destination);
-  rest();
+  if (!ctx) {
+    if (typeof AudioContext === 'undefined') return;
+    ctx = new AudioContext();
+    out = ctx.createGain();
+    out.gain.value = 0.25;
+    out.connect(ctx.destination);
+    // Running (or suspended by rest()): done. iOS 'interrupted' (a call, an app switch): wait for the next gesture.
+    // A context the browser refused to start fires no event, so the listeners stay.
+    ctx.onstatechange = () => listen((ctx!.state as string) === 'interrupted');
+    rest();
+  }
+  if (ctx.state !== 'running') ctx.resume().catch(() => {});
 }
+/** Start listening for the first gesture. */
+export const armAudio = (): void => listen(true);
 
 const gain = (v: number) => {
   const g = ctx!.createGain();
@@ -70,7 +85,7 @@ function tone(type: OscillatorType, from: number, to: number, dur: number, at = 
 
 export function play(s: Sfx): void {
   if (muted || !ctx) return;
-  void ctx.resume();
+  if (ctx.state !== 'running') ctx.resume().catch(() => {});
   rest();
   if (s === 'miss') noise(0.12, 'bandpass', 900);
   else if (s === 'hit') tone('sine', 110, 55, 0.18, 0, 0.9), noise(0.06, 'lowpass', 2000, 0.6);

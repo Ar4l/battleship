@@ -49,8 +49,9 @@ export function lobbyGuest(ctrl: Controller): Screen {
       h('h2', 'h2', `Joining game ${s.code}…`),
       ...(s.slow
         ? [
-            h('p', null, `Still looking for game ${s.code}. Check the code, or ask your friend for a direct link.`),
-            h('div', 'row-btns', btn('Retry', () => ctrl.joinCode(s.code), 'primary'), btn('Back', () => ctrl.leave())),
+            status('Still looking for the host'),
+            h('p', null, 'If your friend switched apps to send the link, the game starts when they come back. Still nothing? Check the code, or ask for a direct link.'),
+            btn('Back', () => ctrl.leave()),
           ]
         : [status('Looking for the host'), btn('Cancel', () => ctrl.leave(), 'quiet')]),
     );

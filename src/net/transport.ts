@@ -7,6 +7,8 @@ export interface Transport {
   close(): void;
   /** Signal that the link is gone (calls onclose once). */
   end(reason: string): void;
+  /** The link dropped (false) or came back (true) without closing. */
+  onstate?: ((up: boolean) => void) | null;
 }
 type Pipe = Transport & { deliver(u8: Uint8Array): void };
 
@@ -70,9 +72,14 @@ export function fromChannel(dc: RTCDataChannel, pc: RTCPeerConnection, onClose?:
   pc.addEventListener('connectionstatechange', () => {
     const s = pc.connectionState;
     clearTimeout(disc);
-    if (s === 'failed' || s === 'closed') t.end(s);
+    // Before the channel opens, 'failed' is not final: ICE recovers when a suspended
+    // peer (a phone in another app) comes back. net/direct.ts bounds that wait.
+    if ((s === 'failed' && dc.readyState === 'open') || s === 'closed') t.end(s);
     // Generous: a phone that briefly switches to a messenger drops consent checks.
-    else if (s === 'disconnected') disc = window.setTimeout(() => t.end(s), 20000);
+    else if (s === 'disconnected') {
+      t.onstate?.(false);
+      disc = window.setTimeout(() => t.end(s), 20000);
+    } else if (s === 'connected') t.onstate?.(true);
   });
   return new Promise((res) => (dc.readyState === 'open' ? res(t) : (dc.onopen = () => res(t))));
 }
