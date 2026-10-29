@@ -20,6 +20,8 @@ Tick items (`[x]`) when done and verified. Owner in brackets.
 - [x] Much clearer when it's your turn [ui]
 - [x] Mobile battle fits one screen; scrolling only for extra details; minimap of your own fleet [ui]
 - [x] Review every screen: clearer, simpler layout and selection; keep the design language [design → ui]
+- [x] Item bar labels fit on narrow phones (11.5px below 380px, no side padding, clipped as a last resort) [ui]
+- [x] Russian placement legend: one non-wrapping group per class, name and ×n first, then its capsules [ui]
 
 ## UI notes (round 4)
 

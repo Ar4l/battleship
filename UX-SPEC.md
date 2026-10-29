@@ -83,8 +83,8 @@ Goal: fits one screen on phones, so Ready is always visible without scrolling.
 2. `PLACE YOUR FLEET` label, with the rules summary (1.3) on the next line.
 3. Board at full width (same size rules as the battle target board, §7.1). Islands are drawn (§10).
 4. Hint, 14 px `--muted`: "Drag to move. Tap a ship to rotate." (shorter than today's).
-5. **Fleet legend, one or two lines, wrapped.** It replaces the two-column list that is currently about 130 px tall. Each class is an inline chip: a capsule glyph with width proportional to length (8 px per cell, 6 px tall), the name in 14 px, and `×n` in mono when n > 1. The selected ship's class is in `--fg` 600 and the others in `--muted`.
-   - Classic: `Carrier 5 · Battleship 4 · Cruiser 3 · Submarine 3 · Destroyer 2` (capsule + name, no count).
+5. **Fleet legend, one or two lines, wrapped.** It replaces the two-column list that is currently about 130 px tall. Each class is an inline chip: a capsule glyph with width proportional to length (8 px per cell, 6 px tall), the name in 14 px, and `×n` in mono when n > 1. The selected ship's class is in `--fg` 600 and the others in `--muted`. Each class is one non-wrapping group: the name and `×n` first, then one capsule per ship (as in the battle fleet lists), so a line never starts with a stray capsule.
+   - Classic: `Carrier 5 · Battleship 4 · Cruiser 3 · Submarine 3 · Destroyer 2` (name + capsule, no count).
    - Russian: `Battleship · Cruiser ×2 · Destroyer ×3 · Boat ×4` (capsules show the length, so no number is needed).
 6. Button row: **Randomize** and **Rotate** (secondary, half width each). Rotate is disabled when no ship is selected, and also when a 1-cell ship is selected.
 7. **Ready** (primary, full width, 48). After it is pressed it reads "Waiting for opponent…" (disabled). "Opponent ready" appears in the hint line in `--fg`.

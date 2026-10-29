@@ -96,7 +96,8 @@ export function placement(ctrl: Controller): Screen {
     render();
   });
 
-  // A legend of chips: the first ship of a class shows its name (and ×n); the rest only their capsule.
+  // A legend of chips: the first ship of a class shows its name (and ×n), then its capsule; the rest only their capsule.
+  // Each class sits in one non-wrapping group, so a capsule never strays next to another class's name.
   const count = (name: string) => SHIP_NAMES.filter((x) => x === name).length;
   const dockBtns = SHIP_NAMES.map((name, i) =>
     h(
@@ -136,10 +137,11 @@ export function placement(ctrl: Controller): Screen {
           render();
         },
       },
-      h('span', { cls: 'cap-ship', style: `--len:${geo().fleet[i]}` }),
       SHIP_NAMES.indexOf(name) === i && h('span', null, name, count(name) > 1 && h('span', 'mono', ' ×' + count(name))),
+      h('span', { cls: 'cap-ship', style: `--len:${geo().fleet[i]}` }),
     ),
   );
+  const dockGroups = [...new Set(SHIP_NAMES)].map((name) => h('li', 'dock-group', dockBtns.filter((_, i) => SHIP_NAMES[i] === name)));
 
   const rules = h('p', 'small muted rules');
   const hint = h('p', 'small muted pl-hint');
@@ -156,7 +158,7 @@ export function placement(ctrl: Controller): Screen {
       'div',
       'pl-side',
       hint,
-      h('ul', { cls: 'dock', 'aria-label': 'Ships' }, dockBtns.map((d) => h('li', null, d))),
+      h('ul', { cls: 'dock', 'aria-label': 'Ships' }, dockGroups),
       h('div', 'row-btns', randomize, rot),
       ready,
     ),
