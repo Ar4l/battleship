@@ -200,6 +200,36 @@ describe('controller over an in-memory transport', () => {
     expect(me.queue).toEqual([]);
   });
 
+  it('prefire an item: it fires first as my turn starts, queued shots follow; skipped when I cannot pay', async () => {
+    const { H, G } = await connect({ items: true });
+    await placeAndStart(H, G);
+    const [me, them] = H.match!.phase === 'theirTurn' ? [H, G] : [G, H];
+    const mine = shipCellsOf(me === H ? FLEET_A : FLEET_B);
+    const sea = untargeted(them.match!).filter((c) => !mine.includes(c));
+    const cross = { k: 'item', item: 2, a: 55, b: 0 } as const;
+    them.prefireItem(cross); // not their phase: ignored
+    expect(them.qItem).toBeNull();
+    me.match!.energy.me = them.match!.energy.them = 3; // 4 when my turn starts
+    me.prefireItem(cross);
+    me.prefire(0);
+    them.attack({ k: 'fire', cells: [sea[0]!] });
+    await until(() => me.match!.phase === 'myTurn');
+    expect(me.qItem).toEqual(cross); // "Firing Cross" for 300 ms
+    await until(() => them.match!.phase === 'myTurn' && me.match!.phase === 'theirTurn');
+    expect(me.match!.stats.me.items).toBe(1);
+    expect(me.match!.target.shot.has(55)).toBe(true);
+    expect(me.queue).toEqual([0]);
+    // Energy 0 now, 1 at my next turn: the cross is skipped, the queued shot fires.
+    me.prefireItem(cross);
+    them.attack({ k: 'fire', cells: [sea[1]!] });
+    await until(() => me.match!.phase === 'myTurn');
+    expect(me.lastResult).toBe('Skipped Cross bomb');
+    expect(me.qItem).toBeNull();
+    await until(() => them.match!.phase === 'myTurn' && me.match!.phase === 'theirTurn');
+    expect(me.match!.target.shot.has(0)).toBe(true);
+    expect(me.match!.stats.me.items).toBe(1);
+  });
+
   it('plays an Items game using every item', async () => {
     const { H, G } = await connect({ items: true });
     await placeAndStart(H, G);

@@ -1,7 +1,8 @@
-import { ENERGY_CAP, ITEMS, footprint, itemParamsValid, SONAR, TORPEDO } from './items';
+import { ENERGY_CAP, HOLD_CAP, ITEMS, footprint, itemParamsValid, SONAR, TORPEDO } from './items';
 import { resolveAttack, resolvedCells, strikeCells } from './resolve';
 import { geoOf, neighbours8, normConfig, shipCells } from './rules';
-import type { Answer, Attack, Cell, Config, Fleet, Geo, Ship } from './types';
+import { seededRng } from './seeded';
+import type { Answer, Attack, Cell, Config, Fleet, Geo, ItemId, Ship } from './types';
 
 export type Side = 'me' | 'them';
 type Phase = 'myTurn' | 'awaitingAnswer' | 'theirTurn' | 'over';
@@ -18,6 +19,8 @@ export interface BoardView {
   sonar: { a: Cell; count: number }[];
   /** Cells resolved by the most recent attack on this board. */
   last: Cell[];
+  /** Pickups: item squares on this board, for its attacker to collect. */
+  pick: Map<Cell, ItemId>;
 }
 
 interface Stats {
@@ -38,6 +41,8 @@ export interface Match {
   own: BoardView;
   phase: Phase;
   energy: Record<Side, number>;
+  /** Pickups: items held, in the order collected. */
+  inv: Record<Side, ItemId[]>;
   pending: Attack | null;
   /** My attacks and the answers they gave; replayed at reveal. */
   transcript: { attack: Attack; answer: Answer }[];
@@ -48,7 +53,7 @@ export interface Match {
   iStarted: boolean;
 }
 
-const newBoard = (g: Geo): BoardView => ({ shot: new Set(g.islands), hit: new Set(), sunk: g.fleet.map(() => null), known: new Set(), sonar: [], last: [] });
+const newBoard = (g: Geo): BoardView => ({ shot: new Set(g.islands), hit: new Set(), sunk: g.fleet.map(() => null), known: new Set(), sonar: [], last: [], pick: new Map() });
 const newStats = (): Stats => ({ shots: 0, hits: 0, turns: 0, items: 0 });
 
 export function createMatch(config: Config, fleet: Fleet, iStart: boolean): Match {
@@ -61,6 +66,7 @@ export function createMatch(config: Config, fleet: Fleet, iStart: boolean): Matc
     own: newBoard(geo),
     phase: 'over',
     energy: { me: 0, them: 0 },
+    inv: { me: [], them: [] },
     pending: null,
     transcript: [],
     round: {},
@@ -79,10 +85,28 @@ export const sunkCount = (b: BoardView): number => b.sunk.filter(Boolean).length
 /** Cells of `b` that can still be fired at. */
 export const untargeted = (m: Match, b: BoardView = m.target): Cell[] => Array.from({ length: m.geo.n ** 2 }, (_, c) => c).filter((c) => !b.shot.has(c));
 
+/** Pickup kinds, weighted: Sonar 3, Torpedo, Cross and Line 2, Airstrike 1 (PLAN.md §7). */
+const PICKS = '0001122334';
+
 function startTurn(m: Match, s: Side): void {
+  const b = attacked(m, s);
+  const t = ++m.stats[s].turns;
   m.phase = turnOf(s);
-  m.stats[s].turns++;
-  if (m.config.items) m.energy[s] = Math.min(ENERGY_CAP, m.energy[s] + 1);
+  if (!m.config.items) return;
+  if (!m.config.pickups) return void (m.energy[s] = Math.min(ENERGY_CAP, m.energy[s] + 1));
+  // Pickups: on turns 1, 4, 7… a new item square appears on the board s attacks, while fewer
+  // than 2 show. It comes from the seed, the side and the turn only, so it says nothing about ships.
+  const free = untargeted(m, b).filter((c) => !b.pick.has(c));
+  const rng = seededRng((m.geo.seed << 16) | (+((s === 'me') !== m.iStarted) << 12) | t);
+  if (t % 3 === 1 && b.pick.size < 2 && free.length) b.pick.set(free[rng(free.length)]!, +PICKS[rng(PICKS.length)]! as ItemId);
+}
+
+/** Pay for an item: energy, or (pickups) one held. */
+function pay(m: Match, s: Side, a: Attack): void {
+  if (a.k !== 'item') return;
+  const inv = m.inv[s];
+  if (m.config.pickups) inv.splice(inv.indexOf(a.item), 1);
+  else m.energy[s] -= ITEMS[a.item]!.cost;
 }
 
 /** Shots the side must fire this turn (Salvo: ships afloat, at most 5, capped by untargeted cells). */
@@ -103,12 +127,13 @@ export function legalAttack(m: Match, attack: Attack, s: Side): string | null {
     return new Set(cells).size < n || cells.some((c) => board.shot.has(c)) ? 'fired at the same cell twice' : null;
   }
   const def = ITEMS[attack.item]!;
+  const pk = m.config.pickups;
   return !m.config.items
     ? 'used an item outside Items mode'
     : !itemParamsValid(m.geo, attack.item, attack.a, attack.b)
       ? 'used an item with invalid inputs'
-      : m.energy[s] < def.cost
-        ? `used ${def.name} without enough energy`
+      : (pk ? !m.inv[s].includes(attack.item) : m.energy[s] < def.cost)
+        ? `used ${def.name} without ${pk ? 'holding it' : 'enough energy'}`
         : footprint(m.geo, attack.item, attack.a, attack.b).every((c) => board.shot.has(c))
           ? 'used an item on cells already fired at'
           : null;
@@ -125,7 +150,12 @@ function apply(m: Match, s: Side, attack: Attack, answer: Answer): void {
   const st = m.stats[s];
   const learn = (cells: Cell[]) => cells.forEach((c) => board.shot.has(c) || board.known.add(c));
   const cells = resolvedCells(g, attack, answer, board.shot);
-  cells.forEach((c) => board.shot.add(c));
+  cells.forEach((c) => {
+    const p = board.pick.get(c);
+    board.shot.add(c);
+    // Pickups: shooting an item square, hit or miss, collects it (lost when the hold is full).
+    if (p !== undefined && board.pick.delete(c) && m.inv[s].length < HOLD_CAP) m.inv[s].push(p);
+  });
   board.last = cells;
   if (attack.k === 'item') st.items++;
   if (answer.k === 'sonar') {
@@ -177,7 +207,7 @@ function half(m: Match, s: Side, attack: Attack, answer: Answer): void {
 export function localAttack(m: Match, attack: Attack): Match {
   const r = legalAttack(m, attack, 'me');
   if (r) throw new Error(r);
-  if (attack.k === 'item') m.energy.me -= ITEMS[attack.item]!.cost;
+  pay(m, 'me', attack);
   m.pending = attack;
   m.phase = 'awaitingAnswer';
   return m;
@@ -187,7 +217,7 @@ export function localAttack(m: Match, attack: Attack): Match {
 export function remoteAttack(m: Match, attack: Attack): { answer: Answer } | { cheat: string } {
   const r = legalAttack(m, attack, 'them');
   if (r) return { cheat: 'they ' + r };
-  if (attack.k === 'item') m.energy.them -= ITEMS[attack.item]!.cost;
+  pay(m, 'them', attack);
   const answer = resolveAttack(m.geo, m.fleet, m.own.shot, attack);
   half(m, 'them', attack, answer);
   // Simultaneous: this may have applied their answer to me as well.

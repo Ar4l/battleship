@@ -1,10 +1,10 @@
 import { occupancy, shipCells } from './rules';
-import { footprint, SONAR, TORPEDO } from './items';
+import { AIRSTRIKE, footprint, scatter, SONAR, TORPEDO } from './items';
 import type { Answer, Attack, Cell, Entry, Fleet, Geo } from './types';
 
 /** Cells an attack strikes directly (fire and area items), filtered to untargeted ones. Not used for torpedo/sonar. */
 export const strikeCells = (g: Geo, attack: Attack, shot: ReadonlySet<Cell>): Cell[] =>
-  attack.k === 'fire' ? attack.cells.slice() : footprint(g, attack.item, attack.a, attack.b).filter((c) => !shot.has(c));
+  attack.k === 'fire' ? attack.cells.slice() : attack.item === AIRSTRIKE ? scatter(g, attack.a, shot) : footprint(g, attack.item, attack.a, attack.b).filter((c) => !shot.has(c));
 
 /**
  * The single source of truth for what a defender must answer.

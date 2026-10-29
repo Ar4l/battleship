@@ -18,7 +18,7 @@ Everything below has been decided. Where research offered alternatives, this pla
 | Anti-cheat | Commit-reveal: SHA-256 over (tag, salt, board) via `crypto.subtle` | Adds 0 bundle bytes |
 | Who starts | Commit-reveal coin flip in game 1. The players then alternate in rematches. | Fair, and matches the anti-cheat theme |
 | Modes | Classic (default), Salvo, Items. Toggles: Extra shot after hit (Classic only, default off), Ships can't touch (default off), Turn timer Off/15/30/60 s (default Off). | Research |
-| Items | Sonar (2), Torpedo (3), Cross bomb (4), Airstrike (4), Line strike (5). Energy +1 per turn, cap 6. | Small and balanced; see §7 |
+| Items | Sonar (3), Torpedo (4), Cross bomb (4), Line strike (4), Airstrike (5). Energy +1 per turn, cap 6, or Pickups (item squares on the board, hold 3). | Balanced by simulation; see §7 |
 | Theme | Nautical-chart look: paper and ink, one signal orange. Light and dark follow `prefers-color-scheme`, with no theme toggle. | Spec, and the anti-AI-look rules |
 | Routing | Hash only: `#4821`, `#o=<blob>`, `#a=<blob>` | Works on GitHub Pages without a 404 trick |
 
@@ -206,8 +206,8 @@ Each frame is one message. Byte 0 is the opcode. The channel is reliable and ord
 
 | Op | Name | Layout | Bytes | Sender |
 |---|---|---|---|---|
-| 0x01 | HELLO | `01 ver=3 role(0 host,1 guest)` | 3 | both, on channel open |
-| 0x02 | CONFIG | `02 flags(b0 extraShot, b1 noTouch, b2 russian, b3 items, b4-5 turns 0 one shot/1 salvo/2 simultaneous) timerSec(0/15/30/60) size(0..3) seedHi seedLo` | 6 | host, after HELLO and in REMATCH |
+| 0x01 | HELLO | `01 ver=5 role(0 host,1 guest)` | 3 | both, on channel open |
+| 0x02 | CONFIG | `02 flags(b0 extraShot, b1 noTouch, b2 russian, b3 items, b4-5 turns 0 one shot/1 salvo/2 simultaneous, b6 pickups) timerSec(0/15/30/60) size(0..3) seedHi seedLo` | 6 | host, after HELLO and in REMATCH |
 | 0x03 | READY | `03 boardCommit[32] coinCommit[32]` | 65 | both, on Ready |
 | 0x04 | COIN | `04 nonce[16]` | 17 | both, after having sent READY **and** received the peer's READY (game 1 only) |
 | 0x10 | FIRE | `10 c1 … cn` (n = 1, or in Salvo up to the fleet size, 8 at most) | 2–11 | attacker |
@@ -231,7 +231,7 @@ Typical sizes: a Classic shot is 2 B and its answer is 3 B (4 B on a sunk). A fu
 - It is actually the attacker's turn.
 - Cells are in range and distinct, and none has been fired at before.
 - The Salvo count equals `min(shipsAfloat(attacker), untargetedCells)`.
-- In Items mode the attacker has the energy for the item, and the item parameters are valid.
+- In Items mode the attacker has the energy for the item (Pickups: holds one), and the item parameters are valid.
 
 **Attacker's live checks on answers:**
 - The cell list matches the footprint.
@@ -280,7 +280,7 @@ Ships are straight, horizontal or vertical. Board size and fleet follow §7.1; C
 - With **Extra shot after a hit** on (Classic and Items, default off), a hit or sunk gives the same player another turn. The turn timer then restarts.
 - A miss passes the turn.
 
-**Settings (protocol 4).** Fleet (Standard / Russian), Turns (One shot / Salvo / Simultaneous salvo) and Items are independent; `normConfig` in `rules.ts` is the one place that fills in what they imply. The controller keeps the raw picks and derives `config` from them, so an implied rule is released when the setting that implied it is turned off. Russian forces 10×10 and no touching, and "hit shoots again" with one-shot turns only. Items and Extra shot need one-shot turns.
+**Settings (protocol 5; 5 added the Pickups flag and the scattered Airstrike).** Fleet (Standard / Russian), Turns (One shot / Salvo / Simultaneous salvo) and Items are independent; `normConfig` in `rules.ts` is the one place that fills in what they imply. The controller keeps the raw picks and derives `config` from them, so an implied rule is released when the setting that implied it is turned off. Russian forces 10×10 and no touching, and "hit shoots again" with one-shot turns only. Items and Extra shot need one-shot turns.
 
 **Salvo.**
 - Shots this turn = `min(5, your ships afloat, untargeted cells)`. Russian (10 ships) starts at 5 too.
@@ -295,19 +295,30 @@ Ships are straight, horizontal or vertical. Board size and fleet follow §7.1; C
 **Items.**
 - Shots are as in Classic. With Extra shot on, any hit (a shot, a torpedo or an area item; never sonar) gives another turn, which does not add energy.
 - Energy: at the **start of each of your turns** you gain +1, capped at 6. You start a game at 0, so your first turn has 1. Both sides track both energies deterministically.
+- **Items from: Pickups** (instead of energy). On your turns 1, 4, 7… an item square appears on the board you attack, on a random untargeted cell, while fewer than 2 show. The cell and kind come from `seededRng(seed << 16 | side << 12 | turn)` (side 0 is whoever started), so both peers agree and it says nothing about ships. Kinds are weighted Sonar 3 : Torpedo 2 : Cross 2 : Line 2 : Airstrike 1, as Electronic Battleship Reloaded hands out more radar than torpedoes. Any cell your attack resolves (a shot, an area item, a torpedo's path; hit or miss) collects the square's item. You hold at most 3 (a fourth is lost) and use one instead of a shot, on a later turn or straight after a hit gives another shot. No energy.
+- **Prefire an item:** on their turn you can pick an item and aim it as on your turn; it is queued (local only) and fires 300 ms into your turn, before the queued shots, which then follow the usual prefire rules. If you can't pay for it then, it is dropped and the strip says "Skipped Cross bomb".
 - On your turn you either **fire one shot** or **use one item**. An item replaces the shot and costs energy. After that the turn passes (unless Extra shot applies).
 - Each item names its footprint inputs `a` and `b`, and its footprint cells are taken in the order listed:
 
 | Id | Item | Cost | Input (a, b) | Effect | Answer |
 |---|---|---|---|---|---|
-| 0 | **Sonar** | 2 | a = centre cell with row and col in 1..8 (the UI clamps it), b = 0 | Counts the **intact** (not yet hit) ship cells in that 3×3. Does no damage. | SONAR count |
-| 1 | **Torpedo** | 3 | a = line index 0..9, b = entry edge 0 left, 1 right, 2 top, 3 bottom (0/1 for a row, 2/3 for a column) | Travels from the edge cell by cell. Cells already fired at are passed over. It stops at the first intact ship cell, which it hits. Every cell it crossed is learned as water. | ANSWER with 1 entry, or empty for a clean run (the whole line holds no intact ship) |
+| 0 | **Sonar** | 3 | a = centre cell with row and col in 1..8 (the UI clamps it), b = 0 | Counts the **intact** (not yet hit) ship cells in that 3×3. Does no damage. | SONAR count |
+| 1 | **Torpedo** | 4 | a = line index 0..9, b = entry edge 0 left, 1 right, 2 top, 3 bottom (0/1 for a row, 2/3 for a column) | Travels from the edge cell by cell. Cells already fired at are passed over. It stops at the first intact ship cell, which it hits. Every cell it crossed is learned as water. | ANSWER with 1 entry, or empty for a clean run (the whole line holds no intact ship) |
 | 2 | **Cross bomb** | 4 | a = centre cell, b = 0 | Centre, N, E, S, W. Arms that fall off the board are dropped. | ANSWER over the untargeted cells |
-| 3 | **Line strike** | 5 | a = start cell (left or top end), b = 0 horizontal / 1 vertical; all 5 cells must be on the board | 5 consecutive cells | ANSWER over the untargeted cells |
-| 4 | **Airstrike** | 4 | a = centre cell, row and col in 2..n-3; b = 0 `\` / 1 `/` | 5 cells on a diagonal, top to bottom | ANSWER over the untargeted cells |
+| 3 | **Line strike** | 4 | a = start cell (left or top end), b = 0 horizontal / 1 vertical; all 5 cells must be on the board | 5 consecutive cells | ANSWER over the untargeted cells |
+| 4 | **Airstrike** | 5 | a = any cell, b = 0 | The chosen cell (if untargeted) plus random untargeted cells of the 5×5 around it, 5 in all, sorted. Drawn with `seededRng(seed << 16 \| resolvedCells << 8 \| a)`, where resolvedCells is how many cells of that board are resolved (islands included): a move counter both peers and the end-of-game replay share, so the shooter can't reroll it. The preview shows the 5×5. | ANSWER over those cells |
 
-Balance notes for implementers (these are not settings):
-- Cross, Airstrike and Line hit the same number of cells. Line costs more because, once lined up with a ship, it can sink a Carrier in one go. The Airstrike touches each ship at most once: the best search, the worst finisher. It costs what the Cross costs.
+Balance (round 6). Other games price area weapons above single-line ones and keep radar mid-priced (BYRIL's Sea Battle: torpedo plane and bomber 10, radar 15, nuke 110; Battleship Reloaded hands out 3 radar, 2 salvo, 1 torpedo), and scatter weapons hit random cells near a target (Sea Battle 2 bombers, the Hasbro video game's bombardment). `scripts/items-sim.mjs` (not shipped) plays solo 10×10 games with a probability-density hunt/target shooter that uses one item whenever it can afford it (Sonar only while hunting); 800 games per row, energy +1 a turn, cap 6. A shot finds 0.38 ship cells on average; with no items a game takes 44.6 shots.
+
+| Item | Cost | Ship cells per use | Shots to win | Turns saved per energy |
+|---|---|---|---|---|
+| Sonar | 3 | 0 (finds them for the next shots) | 35.7 | 0.50 |
+| Torpedo | 4 | 0.73 | 30.0 | 0.51 |
+| Cross bomb | 4 | 1.05 | 29.0 | 0.56 |
+| Line strike | 4 | 1.13 | 29.9 | 0.51 |
+| Airstrike (5×5 scatter, 5 cells) | 5 | 0.96 | 30.6 | 0.48 |
+
+The old prices made Sonar at 2 (0.71) and Torpedo at 3 (0.62) the best buys, Line strike at 5 the worst (0.40), and the scattered Airstrike at 4 (0.61) too good. Now every item saves about half a turn per energy, so none dominates, and each has its moment: Sonar for the last small ships, Torpedo and Airstrike for searching open water, Cross around a hit, Line along a hit pair.
 - Any area item can be centred on cells already fired at; it strikes only the unrevealed cells.
 - The cap of 6 means a player can never bank two big items.
 - If every cell of an area item's footprint has already been fired at, the UI disables the item at that target, and the defender's check rejects it.
@@ -530,12 +541,12 @@ applyAnswer(m, answer): { m, events: UiEvent[] } | { cheat: string }
 | Asset | Budget (gzip -9) | Measured |
 |---|---|---|
 | `index.html` with inlined CSS | ≤ 6.0 KB | 5.9 KB |
-| app JS (entry chunk: game + proto + ui + room) | ≤ 23.6 KB | 23.5 KB |
+| app JS (entry chunk: game + proto + ui + room) | ≤ 24.5 KB | 24.5 KB |
 | Trystero chunk (lazy, trimmed) | ≤ 15.4 KB | 15.0 KB |
 | direct-link chunks (lazy: SDP packing, fallback flows and screens) | ≤ 4.5 KB | 4.0 KB |
-| **Code game total (html + entry + Trystero)** | **≤ 44.5 KB hard** | **44.4 KB** |
+| **Code game total (html + entry + Trystero)** | **≤ 45.5 KB hard** | **45.4 KB** |
 
-Measured values are approximate (rounded, as of round 5); `npm run size` prints exact ones. Only the total is hard (40 KB until round 4, which raised it to 44 KB for board sizes, islands, Russian mode, Airstrike, prefire and the one-screen mobile battle; round 5 raised it to 44.5 KB for the independent rule settings and simultaneous salvo, about 0.5 KB before trimming and 0.42 KB after); the per-file rows are guard rails with some slack so a small CSS change doesn't fail a deploy while the total still fits. The mobile round moved 0.5 KB of rail from Trystero to the entry: it trimmed Trystero's unused stream and track bookkeeping (0.3 KB) to pay for the wake lock, the background ping and the iOS audio unlock. Mobile round 2 moved another 0.4 KB the same way: Trystero's per-peer track plumbing and public media methods went (0.3 KB) to pay for the relay re-check, the wake-lock idle cap and the in-app browser hint.
+Measured values are approximate (rounded, as of round 6); `npm run size` prints exact ones. Only the total is hard (40 KB until round 4, which raised it to 44 KB for board sizes, islands, Russian mode, Airstrike, prefire and the one-screen mobile battle; round 5 raised it to 44.5 KB for the independent rule settings and simultaneous salvo, about 0.5 KB before trimming and 0.42 KB after; round 6 raised it to 45.5 KB for Pickups, the scattered Airstrike and item prefire, 0.88 KB after trimming its own code); the per-file rows are guard rails with some slack so a small CSS change doesn't fail a deploy while the total still fits. The mobile round moved 0.5 KB of rail from Trystero to the entry: it trimmed Trystero's unused stream and track bookkeeping (0.3 KB) to pay for the wake lock, the background ping and the iOS audio unlock. Mobile round 2 moved another 0.4 KB the same way: Trystero's per-peer track plumbing and public media methods went (0.3 KB) to pay for the relay re-check, the wake-lock idle cap and the in-app browser hint.
 
 - The first plan (9 KB entry, 37 KB target) underestimated the UI and anti-cheat code. Instead of raising the budget, the Trystero chunk was trimmed from 22.0 KB to 15.6 KB (`build/trystero/`: no media, no public actions, a one-frame JSON wire for internal messages, no room-password challenge), Vite's preload helper was replaced by a pass-through, the CSS was merged and deduplicated, and the game, protocol and UI modules were rewritten more compactly.
 - No fonts, images or audio files. The favicon is an inline SVG data URI.

@@ -1,6 +1,7 @@
 import { cellName as name } from '../game/board';
 import { bytesEqual, commitBoard, commitCoin, hostStarts, randomBytes } from '../game/commit';
-import { applyAnswer, createMatch, localAttack, remoteAttack, shotsAllowed, untargeted, type Match } from '../game/engine';
+import { applyAnswer, createMatch, legalAttack, localAttack, remoteAttack, shotsAllowed, untargeted, type Match } from '../game/engine';
+import { ITEMS } from '../game/items';
 import { cryptoRng, randomFleet } from '../game/random';
 import { DEFAULT_CONFIG, fleetLegal, geoOf, normConfig } from '../game/rules';
 import type { Answer, Attack, Config, Fleet, Geo, Rng } from '../game/types';
@@ -36,6 +37,8 @@ export class Controller {
   sel: number[] = [];
   /** Prefire: shots queued during their turn, in order, fired as my turn starts (see prefire). */
   queue: number[] = [];
+  /** Prefire in Items mode: an aimed item, fired before the queued shots. */
+  qItem: Attack | null = null;
   /** Most recent result, for the status strip. */
   lastResult = '';
   /** Cells to animate on next render. */
@@ -300,6 +303,7 @@ export class Controller {
     this.timer('reveal');
     this.fleet = randomFleet(this.geo, this.rng);
     this.queue = [];
+    this.qItem = null;
     this.theirBoard = this.theirCoin = this.theirNonce = null;
     this.sentCoin = this.revealed = false;
     this.sel = [];
@@ -389,8 +393,21 @@ export class Controller {
     this.emit();
   }
 
-  /** My turn started with a queue: after 300 ms (the UI says "Firing E4"), fire it. */
+  /** Prefire an aimed item during their turn (null: drop it). Purely local too. */
+  prefireItem(a: Attack | null): void {
+    if (this.match?.phase === 'theirTurn') this.qItem = a;
+    this.emit();
+  }
+
+  /** My turn started with a queue: after 300 ms (the UI says "Firing E4"), fire it. A queued item goes first, or is skipped if I can't use it now. */
   private firePrefire(m: Match): void {
+    const it = this.qItem;
+    if (it?.k === 'item' && legalAttack(m, it, 'me')) {
+      this.lastResult = `Skipped ${ITEMS[it.item]!.name}`;
+      this.qItem = null;
+      this.onAnnounce(this.lastResult);
+      this.emit();
+    }
     const salvo = !!m.config.turns;
     const n = shotsAllowed(m, 'me');
     // Drop cells fired at meanwhile and shots I no longer have.
@@ -401,15 +418,17 @@ export class Controller {
       this.queue = [];
       return;
     }
-    if (!this.queue.length) return;
+    if (!this.queue.length && !this.qItem) return;
     this.timer('prefire', 300, () => {
       if (this.match !== m || m.phase !== 'myTurn') return;
+      if (this.qItem) return void this.attack(this.qItem, true);
       const cells = salvo ? this.queue.splice(0) : this.queue.splice(0, 1);
       this.attack({ k: 'fire', cells }, true);
     });
   }
   clearPrefire(): void {
     this.queue = [];
+    this.qItem = null;
     this.emit();
   }
 
@@ -423,6 +442,7 @@ export class Controller {
       return false;
     }
     if (!queued) this.queue = a.k === 'fire' ? this.queue.filter((c) => !a.cells.includes(c)) : [];
+    this.qItem = null;
     this.timer('prefire');
     this.sel = [];
     this.timer('turn');
@@ -584,11 +604,13 @@ export class Controller {
     const s = this.state;
     if (s.s !== 'battle') return;
     if (s.match.phase !== 'awaitingAnswer') return this.cheat('they answered out of turn');
+    const inv = s.match.inv.me;
+    const held = inv.length;
     const r = applyAnswer(s.match, a);
     if ('cheat' in r) return this.cheat(r.cheat);
     if (s.match.config.turns > 1) return this.settled(s);
     this.fx = { target: s.match.target.last.slice(), own: [] };
-    const text = (this.timedOut ? "Time's up. " : '') + this.describe(a, true);
+    const text = (this.timedOut ? "Time's up. " : '') + this.describe(a, true) + (inv.length > held ? ' · Got ' + ITEMS[inv.at(-1)!]!.name : '');
     this.timedOut = false;
     this.result(s, text, a);
   }
@@ -599,6 +621,7 @@ export class Controller {
     for (const n of ['turn', 'stall', 'banner', 'prefire']) this.timer(n);
     this.deadline = 0;
     this.queue = [];
+    this.qItem = null;
     match.phase = 'over';
     if (doc) doc.title = 'Battleship';
     this.set({ s: 'end', match, verdict, reason, theirVerdict: null, rematch: { me: false, them: false }, peerLeft: false });

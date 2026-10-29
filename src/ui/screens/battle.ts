@@ -1,11 +1,11 @@
 import type { Controller } from '../../app/controller';
 import { cellName } from '../../game/board';
 import { shotsAllowed, type BoardView, type Match } from '../../game/engine';
-import { ENERGY_CAP, ITEMS, clampAirstrike, clampLine, clampSonar, footprint, itemParamsValid } from '../../game/items';
+import { ENERGY_CAP, HOLD_CAP, ITEMS, clampLine, clampSonar, footprint, itemParamsValid } from '../../game/items';
 import { rulesLine } from '../../game/rules';
 import type { Attack, Fleet, Geo, ItemId } from '../../game/types';
 import { announce } from '../announce';
-import { board, capsule, cellsOf, hit, knownDot, land, last, miss, queued, sonarBox, sunk, torpedo, type BoardModel } from '../grid';
+import { board, capsule, cellsOf, hit, knownDot, land, last, miss, pickup, queued, sonarBox, sunk, torpedo, type BoardModel } from '../grid';
 import { h } from '../h';
 import { btn, label, type Screen } from '../kit';
 
@@ -43,13 +43,15 @@ export function model(
     const sel = o.sel?.includes(c);
     const q = o.queue?.indexOf(c) ?? -1;
     const name = SHIP_NAMES[occ[c]!];
+    const pk = b.pick.get(c);
     cls.push([shot && 'shot', known && !isHit && 'known', sel && 'sel', o.preview?.has(c) && (o.lane ? 'lane' : 'pv'), q >= 0 && 'queued'].filter(Boolean).join(' '));
     labels.push(
-      `${cellName(c, g.n)}, ${sunkAt[c] !== undefined ? 'sunk ' + SHIP_NAMES[sunkAt[c]!] : isHit ? (name ? name + ' hit' : 'hit') : known ? 'known water' : shot ? 'miss' : name || (o.own ? 'water' : 'unknown')}${sel ? ', selected' : q >= 0 ? ', queued' : ''}`,
+      `${cellName(c, g.n)}, ${sunkAt[c] !== undefined ? 'sunk ' + SHIP_NAMES[sunkAt[c]!] : isHit ? (name ? name + ' hit' : 'hit') : known ? 'known water' : shot ? 'miss' : name || (o.own ? 'water' : 'unknown')}${pk === undefined ? '' : ', item square: ' + ITEMS[pk]!.name}${sel ? ', selected' : q >= 0 ? ', queued' : ''}`,
     );
     const a = delay.get(c) ?? -1;
     if (known && !isHit) ov += knownDot(c);
     else if (shot) ov += isHit ? hit(c, a, !!o.own) : miss(c, a);
+    if (pk !== undefined) ov += pickup(c, ITEMS[pk]!.name[0]!);
     if (q >= 0) ov += queued(c, q, o.queue!.length > 1);
   }
   b.sunk.forEach((s, i) => s && (ov += sunk(s, g.fleet[i]!, cellsOf(g, s, i).some((c) => delay.has(c)))));
@@ -123,7 +125,7 @@ export function battle(ctrl: Controller): Screen {
     armed = tapped = false;
     render();
   };
-  const dirName = () => (item === 1 ? TORPEDO_DIRS[dir % 4] : item === 3 ? (dir % 2 ? 'Vertical' : 'Horizontal') : item === 4 ? (dir % 2 ? 'Diagonal ↙' : 'Diagonal ↘') : '');
+  const dirName = () => (item === 1 ? TORPEDO_DIRS[dir % 4] : item === 3 ? (dir % 2 ? 'Vertical' : 'Horizontal') : '');
 
   const itemAttack = (cell: number | null): Attack | null => {
     if (item === null || cell === null) return null;
@@ -136,15 +138,13 @@ export function battle(ctrl: Controller): Screen {
     } else if (item === 3) {
       b = dir % 2;
       a = clampLine(g, cell, b === 1);
-    } else if (item === 4) {
-      b = dir % 2;
-      a = clampAirstrike(g, cell);
     }
     return itemParamsValid(g, item, a, b) && !footprint(g, item, a, b).every((c) => m().target.shot.has(c)) ? { k: 'item', item, a, b } : null;
   };
+  /** Fire the item, or on their turn queue it. */
   const fireItem = (cell: number | null) => {
     const atk = itemAttack(cell);
-    if (atk && ctrl.attack(atk)) {
+    if (atk && (m().phase === 'myTurn' ? ctrl.attack(atk) : (ctrl.prefireItem(atk), announce('Queued ' + ITEMS[item!]!.name), true))) {
       lastAim = cell;
       item = aim = null;
     }
@@ -152,13 +152,14 @@ export function battle(ctrl: Controller): Screen {
 
   const activate = (cell: number, touch: boolean) => {
     const mm = m();
-    if (mm.phase === 'theirTurn') {
+    const later = mm.phase === 'theirTurn';
+    if (later && item === null) {
       if (g.islands.has(cell) || mm.target.shot.has(cell)) return;
       const had = ctrl.queue.includes(cell);
       ctrl.prefire(cell);
       return announce(ctrl.queue.includes(cell) ? `Queued ${cellName(cell, n)}` : had ? `Removed ${cellName(cell, n)}` : 'Queue full');
     }
-    if (mm.phase !== 'myTurn') return;
+    if (mm.phase !== 'myTurn' && !later) return;
     if (item !== null) {
       if (!itemAttack(cell)) return;
       // Touch: the first tap aims, a second tap on the same cell fires.
@@ -186,7 +187,7 @@ export function battle(ctrl: Controller): Screen {
       const k = e.key;
       if (k === 'Escape') {
         if (item !== null) pick(null);
-        else if (ctrl.queue.length) {
+        else if (ctrl.queue.length || ctrl.qItem) {
           ctrl.clearPrefire();
           announce('Queue cleared');
         } else ctrl.clearSel();
@@ -281,7 +282,8 @@ export function battle(ctrl: Controller): Screen {
     const tip = mm.phase === 'theirTurn' && theirTurns <= 2 && h('p', 'small', TIP);
     // Simultaneous: whether their salvo is in yet.
     const ready = turns > 1 && h('p', { cls: 'small muted', id: 'them-ready' }, mm.round.them ? "They're ready." : "They're still picking.");
-    const key = [mm.phase, !!tip, item, dir, armed, tapped, aim, e, ctrl.sel.length, shots, mm.target.sunk.join(), mm.own.sunk.join(), !!mm.round.them].join();
+    const inv = mm.inv.me;
+    const key = [mm.phase, !!tip, item, dir, armed, tapped, aim, e, ctrl.sel.length, shots, mm.target.sunk.join(), mm.own.sunk.join(), !!mm.round.them, inv.join(), ctrl.qItem?.k].join();
     if (key === actionsKey) return;
     actionsKey = key;
     if (!hasItems) {
@@ -293,6 +295,12 @@ export function battle(ctrl: Controller): Screen {
     const it = item === null ? null : ITEMS[item]!;
     const dn = dirName();
     const cost = it?.cost ?? 0;
+    const pk = mm.config.pickups;
+    const held = (id: number) => inv.filter((x) => x === id).length;
+    // On their turn items can be queued: what I'll have when my turn starts.
+    const later = mm.phase === 'theirTurn';
+    const at = later ? Math.min(ENERGY_CAP, e + 1) : e;
+    const verb = my ? 'fire' : 'queue';
     items.replaceChildren(
       h(
         'div',
@@ -303,8 +311,8 @@ export function battle(ctrl: Controller): Screen {
             {
               cls: 'item',
               'aria-pressed': String(item === d.id),
-              'aria-label': `${d.name}, costs ${d.cost}. ${d.desc}`,
-              disabled: !my || e < d.cost,
+              'aria-label': `${d.name}, ${pk ? held(d.id) + ' held' : 'costs ' + d.cost}. ${d.desc}`,
+              disabled: !(my || later) || (pk ? !held(d.id) : at < d.cost),
               onclick: (ev: MouseEvent) => {
                 pick(item === d.id ? null : d.id);
                 // Keyboard (detail 0): on to the board, where arrows move the footprint.
@@ -312,23 +320,25 @@ export function battle(ctrl: Controller): Screen {
               },
             },
             h('span', null, short(d.id)),
-            pips(d.cost, d.cost, 'cost'),
+            pk ? h('span', 'mono small', '×' + held(d.id)) : pips(d.cost, d.cost, 'cost'),
           ),
         ),
       ),
     );
     const rot = btn(dn || 'Rotate', () => (dir++, render()), '', 'item-dir', 'rotate');
     rot.style.visibility = dn ? '' : 'hidden';
-    const fire = btn('Fire', () => fireItem(aim), 'primary', 'item-fire');
-    fire.disabled = !my || !armed || !itemAttack(aim);
+    const fire = btn(my ? 'Fire' : 'Queue', () => fireItem(aim), 'primary', 'item-fire');
+    fire.disabled = !(my || later) || !armed || !itemAttack(aim);
+    // Energy, or (pickups) items held.
+    const [have, cap] = pk ? [inv.length, HOLD_CAP] : [e, ENERGY_CAP];
     side.replaceChildren(
       h(
         'div',
         'energy',
-        label('Energy'),
-        pips(e, ENERGY_CAP, '', cost),
-        h('span', { cls: 'mono small', id: 'energy' }, `${e}/${ENERGY_CAP}`),
-        !my && h('span', 'small muted', e < ENERGY_CAP ? '+1 next turn' : 'Full'),
+        label(pk ? 'Held' : 'Energy'),
+        pips(have, cap, '', pk ? 0 : cost),
+        h('span', { cls: 'mono small', id: 'energy' }, `${have}/${cap}`),
+        !my && h('span', 'small muted', pk ? 'Shoot ◇ to collect' : e < cap ? '+1 next turn' : 'Full'),
       ),
       h(
         'div',
@@ -336,7 +346,7 @@ export function battle(ctrl: Controller): Screen {
         h(
           'p',
           'item-hint small',
-          h('span', { cls: it ? '' : 'muted' }, !it ? (my ? 'Fire a shot, or pick an item.' : TIP) : `${short(it.id)}: ${it.desc.toLowerCase()}. ${tapped ? 'Tap again to fire.' : 'Pick a target.'}`),
+          h('span', { cls: it ? '' : 'muted' }, !it ? (my ? 'Fire a shot, or pick an item.' : 'Queue shots, or an item.') : `${short(it.id)}: ${it.desc.toLowerCase()}. ${tapped ? `Tap again to ${verb}.` : 'Pick a target.'}`),
           it && ' ',
           it && h('button', { cls: 'textlink', onclick: () => pick(null) }, 'Cancel'),
         ),
@@ -353,28 +363,31 @@ export function battle(ctrl: Controller): Screen {
     const theirTurn = mm.phase === 'theirTurn';
     if (theirTurn && phase !== mm.phase) theirTurns++;
     phase = mm.phase;
-    if (!my) item = aim = null;
+    if (!my && !theirTurn) item = aim = null;
     const q = ctrl.queue;
-    const qNames = q.map((c) => cellName(c, n)).join(', ');
+    const qi = ctrl.qItem;
+    const qName = qi?.k === 'item' ? short(qi.item) : '';
+    const qNames = [qName, ...q.map((c) => cellName(c, n))].filter(Boolean).join(', ');
     el.dataset.turn = theirTurn ? 'them' : 'me';
     stripText.textContent = s.banner ?? (my ? 'Your turn' : mm.phase !== 'awaitingAnswer' ? 'Their turn' : mm.config.turns > 1 ? 'Waiting for them' : 'Firing…');
     const dn = dirName();
     const r = ctrl.lastResult;
     stripSub.textContent = s.banner
       ? ''
-      : my && q.length
-        ? 'Firing ' + (mm.config.turns ? qNames : cellName(q[0]!, n))
-        : my && tapped && item !== null
-          ? 'Tap again to fire' + (dn ? ', ' + dn.toLowerCase() : '')
-          : theirTurn && q.length
+      : my && (q.length || qi)
+        ? 'Firing ' + (qName || (mm.config.turns ? qNames : cellName(q[0]!, n)))
+        : tapped && item !== null
+          ? `Tap again to ${my ? 'fire' : 'queue'}` + (dn ? ', ' + dn.toLowerCase() : '')
+          : theirTurn && qNames
             ? 'Next: ' + qNames
             : my && r.startsWith('You') && mm.config.turns < 2
                 ? r + '. Shoot again.'
                 : r;
-    clear.hidden = !(theirTurn && q.length);
-    const atk = my ? itemAttack(aim) : null;
+    clear.hidden = !(theirTurn && qNames);
+    // The item being aimed, else (their turn) the queued one.
+    const atk = (my || theirTurn ? itemAttack(aim) : null) ?? (theirTurn ? qi : null);
     const preview = atk?.k === 'item' ? new Set(footprint(g, atk.item, atk.a, atk.b)) : undefined;
-    target.el.classList.toggle('armed', my);
+    target.el.classList.toggle('armed', my || item !== null);
     target.el.classList.toggle('live', !theirTurn);
     target.el.classList.toggle('dim', theirTurn);
     own.el.classList.toggle('live', theirTurn);
@@ -382,7 +395,7 @@ export function battle(ctrl: Controller): Screen {
     // A sent salvo stays marked until the answer lands.
     const out = mm.pending ?? mm.round.me?.[0];
     const sent = out?.k === 'fire' ? out.cells : ctrl.sel;
-    const tm = model(g, mm.target, { sel: sent, preview, lane: item === 1, queue: q, anim: ctrl.fx.target });
+    const tm = model(g, mm.target, { sel: sent, preview, lane: atk?.k === 'item' && atk.item === 1, queue: q, anim: ctrl.fx.target });
     if (atk?.k === 'item' && atk.item === 1) tm.overlay += torpedo(g, [...preview!], atk.b, preview!.size < n);
     target.update(tm);
     own.update(model(g, mm.own, { own: mm.fleet, anim: ctrl.fx.own }));

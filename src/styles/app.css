@@ -665,6 +665,7 @@ input {
 .last,
 .queued,
 .sonar,
+.pick,
 .ghost,
 .own.selected {
   fill: none;
@@ -686,6 +687,14 @@ input {
 .sonar-n {
   font: 600 0.4px var(--mono);
   fill: var(--fg);
+}
+.pick {
+  stroke-width: 1.5px;
+}
+.pick-k {
+  font: 700 0.3px var(--mono);
+  fill: var(--fg);
+  text-anchor: middle;
 }
 .ghost.bad {
   stroke: var(--signal);

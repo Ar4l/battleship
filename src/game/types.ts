@@ -16,8 +16,10 @@ export interface Config {
   /** Russian fleet: 1×4, 2×3, 3×2, 4×1 on 10×10, no touching. */
   russian: boolean;
   turns: Turns;
-  /** Energy and items (one-shot turns only). */
+  /** Items (one-shot turns only). */
   items: boolean;
+  /** Items come from item squares on the board instead of energy. */
+  pickups: boolean;
   extraShot: boolean;
   noTouch: boolean;
   timer: Timer;
@@ -37,6 +39,8 @@ export interface Geo {
   /** Total ship cells. */
   total: number;
   noTouch: boolean;
+  /** Config seed: islands, airstrike scatter and pickups derive from it. */
+  seed: number;
 }
 export type ItemId = 0 | 1 | 2 | 3 | 4;
 export type Attack =

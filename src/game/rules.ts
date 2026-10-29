@@ -3,7 +3,7 @@ import type { Cell, Config, Fleet, Geo, Ship, Size, Timer, Turns } from './types
 
 export const SIZES = [8, 10, 12, 14] as const;
 export const TIMERS: readonly Timer[] = [0, 15, 30, 60];
-export const DEFAULT_CONFIG: Config = { russian: false, turns: 0, items: false, extraShot: false, noTouch: false, timer: 0, size: 1, seed: 0 };
+export const DEFAULT_CONFIG: Config = { russian: false, turns: 0, items: false, pickups: false, extraShot: false, noTouch: false, timer: 0, size: 1, seed: 0 };
 
 // Fleet per board size (lengths, names), then the Russian fleet: 1×4, 2×3, 3×2, 4×1.
 const FLEETS = ['4332', '54332', '5433322', '54433322', '4332221111'];
@@ -59,7 +59,7 @@ export function makeIslands(n: number, count: number, seed: number): Set<Cell> {
 export function normConfig(c: Config): Config {
   const ru = c.russian;
   const one = !c.turns;
-  return { ...c, items: one && c.items, extraShot: one && (ru || c.extraShot), noTouch: ru || c.noTouch, size: ru ? 1 : c.size, seed: c.seed & 0xffff };
+  return { ...c, items: one && c.items, pickups: one && c.items && c.pickups, extraShot: one && (ru || c.extraShot), noTouch: ru || c.noTouch, size: ru ? 1 : c.size, seed: c.seed & 0xffff };
 }
 
 const geos = new Map<string, Geo>();
@@ -67,12 +67,12 @@ const geos = new Map<string, Geo>();
 export function geoOf(config: Config): Geo {
   const c = normConfig(config);
   const f = c.russian ? 4 : c.size;
-  const key = [f, c.size, c.size > 1 ? c.seed : 0, c.noTouch].join();
+  const key = [f, c.size, c.seed, c.noTouch].join();
   let g = geos.get(key);
   if (!g) {
     const n = SIZES[c.size];
     const fleet = [...FLEETS[f]!].map(Number);
-    g = { n, fleet, names: NAMES[f]!.split(','), islands: makeIslands(n, ISLANDS[c.size]!, c.seed), total: fleet.reduce((a, b) => a + b), noTouch: c.noTouch };
+    g = { n, fleet, names: NAMES[f]!.split(','), islands: makeIslands(n, ISLANDS[c.size]!, c.seed), total: fleet.reduce((a, b) => a + b), noTouch: c.noTouch, seed: c.seed };
     geos.set(key, g);
   }
   return g;
@@ -109,14 +109,14 @@ export const fleetLegal = (g: Geo, fleet: Fleet): boolean => fleet.length === g.
 /** Can ship i be placed at `ship` given the rest of the fleet? */
 export const canPlace = (g: Geo, fleet: Fleet, i: number, ship: Ship): boolean => fleetLegal(g, fleet.map((s, k) => (k === i ? ship : s)));
 
-/** 5 bytes: flags (extra shot, no touch, Russian, items, turns << 4), timer, size, seed. */
-export const encodeConfig = (c: Config): number[] => [+c.extraShot | (+c.noTouch << 1) | (+c.russian << 2) | (+c.items << 3) | (c.turns << 4), c.timer, c.size, c.seed >> 8, c.seed & 255];
+/** 5 bytes: flags (extra shot, no touch, Russian, items, turns << 4, pickups << 6), timer, size, seed. */
+export const encodeConfig = (c: Config): number[] => [+c.extraShot | (+c.noTouch << 1) | (+c.russian << 2) | (+c.items << 3) | (c.turns << 4) | (+c.pickups << 6), c.timer, c.size, c.seed >> 8, c.seed & 255];
 
 export function decodeConfig(b: ArrayLike<number>): Config | null {
   const [f = 99, timer = 9, size = 9, hi = 0, lo = 0] = Array.from(b);
-  return b.length !== 5 || f > 47 || size > 3 || !TIMERS.includes(timer as Timer)
+  return b.length !== 5 || f > 111 || (f & 48) > 32 || size > 3 || !TIMERS.includes(timer as Timer)
     ? null
-    : normConfig({ extraShot: !!(f & 1), noTouch: !!(f & 2), russian: !!(f & 4), items: !!(f & 8), turns: (f >> 4) as Turns, timer: timer as Timer, size: size as Size, seed: (hi << 8) | lo });
+    : normConfig({ extraShot: !!(f & 1), noTouch: !!(f & 2), russian: !!(f & 4), items: !!(f & 8), pickups: !!(f & 64), turns: ((f >> 4) & 3) as Turns, timer: timer as Timer, size: size as Size, seed: (hi << 8) | lo });
 }
 
 /** e.g. "Russian · Salvo, simultaneous · 10×10 · No timer". Implied rules are left out. */
@@ -126,7 +126,7 @@ export function rulesLine(config: Config): string {
   return [
     c.russian && 'Russian',
     ['One shot', 'Salvo', 'Salvo, simultaneous'][c.turns],
-    c.items && 'Items',
+    c.items && (c.pickups ? 'Item pickups' : 'Items'),
     `${n}×${n}`,
     !c.russian && c.extraShot && 'Extra shot after a hit',
     !c.russian && c.noTouch && "Ships can't touch",

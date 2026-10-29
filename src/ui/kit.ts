@@ -105,6 +105,7 @@ export function settings(ctrl: Controller): HTMLElement {
       seg('Map', 'size', SIZES.map((n, i) => [i as Size, `${n}×${n}`]), ru ? 'Always 10×10 in Russian.' : MAP_DESC[Math.min(c.size, 2)], (v) => ru && v !== 1),
       seg('Turn timer', 'timer', TIMERS.map((t) => [t, t ? t + ' s' : 'Off'])),
       h('div', 'switches', toggle('Items', 'items', salvo || 'Sonar, torpedoes and strikes', !!salvo), toggle('Extra shot after a hit', 'extraShot', salvo || always), toggle("Ships can't touch", 'noTouch', always)),
+      c.items ? seg('Items from', 'pickups', [[false, 'Energy'], [true, 'Pickups']], c.pickups ? 'Shoot item squares to collect items, up to 3.' : '+1 energy a turn, items cost energy.') : '',
     );
   };
   render();

@@ -70,6 +70,41 @@ test.describe('direct-link fallback (offline-safe)', () => {
     await expect(B.locator('#verdict')).toHaveText('Fleet verified');
   });
 
+  test('Pickups: shoot an item square, queue the item on their turn, it fires first; verified', async ({ browser }) => {
+    const A = await player(browser);
+    const B = await player(browser);
+    await connectDirect(A, B, 'Items', ['Pickups']);
+    await expect(B.locator('.rules')).toContainText('Item pickups');
+    await readyBoth(A, B);
+    type W = { __bs: { state(): { match: { target: { pick: Map<number, number>; shot: Set<number> }; inv: { me: number[] }; stats: { me: { items: number } } } } } };
+    const sq = (p: typeof A) => p.evaluate(() => [...(window as unknown as W).__bs.state().match.target.pick.keys()]);
+    let p = await waitTurn(A, B);
+    if (p === B) {
+      await targetCell(B, 99).click();
+      p = await waitTurn(A, B);
+    }
+    const [cell] = await sq(A);
+    await expect(A.locator(`.a-target .cell[data-i="${cell}"]`)).toHaveAttribute('aria-label', /item square/);
+    await expect(A.locator('.a-target .pick')).toHaveCount((await sq(A)).length);
+    await targetCell(A, cell!).click();
+    await expect.poll(() => A.evaluate(() => (window as unknown as W).__bs.state().match.inv.me.length)).toBe(1);
+    await expect(A.locator('#energy')).toHaveText('1/3');
+    await expect(A.locator('#strip')).toContainText('Got ');
+    // Their turn: the held item is enabled; aim it and queue it.
+    await expect.poll(() => A.evaluate(() => (window as any).__bs.state().match.phase)).toBe('theirTurn');
+    await A.locator('.item:not([disabled])').first().click();
+    const free = await A.evaluate(() => [44, 45, 54, 55, 33].find((c) => !(window as unknown as W).__bs.state().match.target.shot.has(c))!);
+    await targetCell(A, free).hover();
+    await targetCell(A, free).click();
+    await expect(A.locator('.strip-sub')).toContainText('Next: ');
+    await targetCell(B, 98).click();
+    await expect.poll(() => A.evaluate(() => (window as unknown as W).__bs.state().match.stats.me.items)).toBe(1);
+    expect(await A.evaluate(() => (window as unknown as W).__bs.state().match.inv.me.length)).toBe(0);
+    await playOut(A, B, A);
+    await expect(A.locator('#verdict')).toHaveText('Fleet verified');
+    await expect(B.locator('#verdict')).toHaveText('Fleet verified');
+  });
+
   test('Russian: ten ships, a hit shoots again, verified at the end', async ({ browser }) => {
     const A = await player(browser);
     const B = await player(browser);

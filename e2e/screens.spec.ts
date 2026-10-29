@@ -100,10 +100,26 @@ for (const size of SIZES)
       await A.evaluate(() => ((window as any).__bs.state().match.energy.me = 6));
       await B.evaluate(() => ((window as any).__bs.state().match.energy.them = 6));
       await A.evaluate(() => (window as any).__bs.ctrl.emit());
-      await A.getByRole('button', { name: /^Line strike/ }).click();
+      await A.getByRole('button', { name: /^Airstrike/ }).click();
       await targetCell(A, 52).hover();
       await targetCell(A, 52).focus();
       await shot(A, `07-battle-items-${tag}`);
+      // The same board as Pickups shows it (A's view only, for the picture): item squares and the held items.
+      await A.evaluate(() => {
+        const m = (window as any).__bs.state().match;
+        m.config.pickups = true;
+        m.inv.me = [4, 2, 0];
+        m.target.pick = new Map([[27, 1], [81, 3]]);
+        (window as any).__bs.ctrl.emit();
+      });
+      await shot(A, `07c-battle-pickups-${tag}`);
+      await A.evaluate(() => {
+        const m = (window as any).__bs.state().match;
+        m.config.pickups = false;
+        m.inv.me = [];
+        m.target.pick = new Map();
+        (window as any).__bs.ctrl.emit();
+      });
       // Layout and anti-"AI look" checks on the live battle screen.
       const audit = await A.evaluate(() => {
         const bad: string[] = [];

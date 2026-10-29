@@ -2,8 +2,8 @@ import { decodeFleet, decodeShip, encodeFleet, encodeShip } from '../game/board'
 import { decodeConfig, encodeConfig } from '../game/rules';
 import type { Config, Entry, Fleet, ItemId } from '../game/types';
 
-/** 4: independent fleet, turns and items settings (5-byte config); simultaneous salvo. */
-export const PROTO_VERSION = 4;
+/** 5: airstrike scatter, item pickups (config flag bit 6). 4: independent fleet, turns and items settings; simultaneous salvo. */
+export const PROTO_VERSION = 5;
 
 export type Msg =
   | { t: 'hello'; ver: number; role: 0 | 1 }

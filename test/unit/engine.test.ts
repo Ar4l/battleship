@@ -4,6 +4,7 @@ import { randomFleet } from '../../src/game/random';
 import { fleetLegal, geoOf } from '../../src/game/rules';
 import { seededRng } from '../../src/game/seeded';
 import { resolveAttack } from '../../src/game/resolve';
+import { ITEMS, scatter } from '../../src/game/items';
 import type { Attack, Config, Fleet } from '../../src/game/types';
 import { FLEET_A, FLEET_B, G, cfgOf as cfg } from './helpers';
 
@@ -108,9 +109,11 @@ describe('engine: items', () => {
   it('items need enough energy and replace the shot', () => {
     const { A, B, play } = pair(cfg({ items: true }));
     expect(legalAttack(A, sonar(11), 'me')).toMatch(/enough energy/);
-    play(A, B, fire(50));
-    play(B, A, fire(50));
-    expect(A.energy.me).toBe(2);
+    for (const c of [50, 51]) {
+      play(A, B, fire(c));
+      play(B, A, fire(c));
+    }
+    expect(A.energy.me).toBe(3);
     const ans = play(A, B, sonar(11));
     expect(ans).toEqual({ k: 'sonar', count: 2 }); // FLEET_B destroyer cells 1, 11
     expect(A.energy.me).toBe(0);
@@ -184,12 +187,13 @@ describe('engine: area items on revealed cells', () => {
     expect(x.k === 'cells' && x.entries.map((e) => e.cell)).toEqual([7, 18, 27, 16]);
     expect(A.target.hit.has(7) && A.target.hit.has(27)).toBe(true);
   });
-  it('airstrike resolves through the engine and costs 4', () => {
-    const { A, B, play } = pair(cfg({ items: true }));
-    A.energy.me = B.energy.them = 4;
-    const x = play(A, B, { k: 'item', item: 4, a: 33, b: 1 }); // 15 24 33 42 51
-    expect(x.k === 'cells' && x.entries.map((e) => [e.cell, e.code])).toEqual([[15, 1], [24, 0], [33, 0], [42, 0], [51, 0]]);
-    expect(A.energy.me).toBe(0);
+  it('airstrike: both sides draw the same scatter', () => {
+    const { A, B, play } = pair(cfg({ items: true, seed: 4242 }));
+    A.energy.me = B.energy.them = 6;
+    const x = play(A, B, { k: 'item', item: 4, a: 15, b: 0 });
+    expect(x.k === 'cells' && x.entries.map((e) => e.cell)).toEqual(scatter(A.geo, 15, new Set()));
+    expect(A.target.shot).toEqual(B.own.shot);
+    expect(A.energy.me).toBe(6 - ITEMS[4]!.cost);
   });
 });
 
@@ -204,6 +208,7 @@ describe('engine: extra shot in Items mode', () => {
     B.energy.them = 6;
     play(A, B, { k: 'item', item: 1, a: 7, b: 2 }); // torpedo down column 7: hits 7
     expect(A.phase).toBe('myTurn');
+    A.energy.me = B.energy.them = 6;
     play(A, B, { k: 'item', item: 0, a: 55, b: 0 }); // sonar never grants another turn
     expect(A.phase).toBe('theirTurn');
     play(B, A, fire(99));

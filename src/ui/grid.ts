@@ -169,6 +169,9 @@ export function land(g: Geo): string {
   }
   return fill && `<path class="land" d="${fill}"/><path class="coast" d="${coast}"/>`;
 }
+/** Pickups: an item square, a small diamond with the item's initial. */
+export const pickup = (c: number, k: string) =>
+  `<path class="pick" d="M${x(c) + 0.5} ${y(c) + 0.12}l.38 .38-.38 .38-.38-.38z"/><text class="pick-k" x="${x(c) + 0.5}" y="${y(c) + 0.62}">${k}</text>`;
 /** Prefire: a hollow ring, numbered when several are queued. */
 export const queued = (c: number, k: number, many: boolean) =>
   dot('queued', c, 0.28) + (many ? `<text class="sonar-n" x="${x(c) + 0.08}" y="${y(c) + 0.36}">${k + 1}</text>` : '');

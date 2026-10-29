@@ -29,10 +29,17 @@ Tick items (`[x]`) when done and verified. Owner in brackets.
 - [x] Simultaneous Salvo: both pick shots at once, resolve when both sent; draw if both fleets sink in the same round; prefire hidden in this mode [logic + ui]
 
 ## Round 6: items
-- [ ] Rebalance items (research other games + a quick simulation of value per energy) [logic]
-- [ ] Airstrike: hits the chosen square plus random squares near it, as in other games (fair randomness from the shared seed) [logic + ui]
-- [ ] New item source "Pickups": item squares appear on the target board; shooting one gives you an item (inventory instead of energy) [logic + ui]
-- [ ] Prefire in Items mode: queue an item (aimed) during their turn; it fires first at turn start, skipped with a note if unaffordable [logic + ui]
+- [x] Rebalance items (research other games + a quick simulation of value per energy) [logic]
+- [x] Airstrike: hits the chosen square plus random squares near it, as in other games (fair randomness from the shared seed) [logic + ui]
+- [x] New item source "Pickups": item squares appear on the target board; shooting one gives you an item (inventory instead of energy) [logic + ui]
+- [x] Prefire in Items mode: queue an item (aimed) during their turn; it fires first at turn start, skipped with a note if unaffordable [logic + ui]
+
+## Round 6 notes
+
+- Costs are now Sonar 3, Torpedo 4, Cross 4, Line 4, Airstrike 5 (simulation and sources in PLAN.md §7).
+- The Airstrike aims at any square and hits it plus 4 random untargeted squares of the 5×5 around it, drawn from the seed and the board's resolved-cell count. The preview shows the 5×5; there is no Rotate. This replaces UX-SPEC §9.5.
+- "Items from: Energy | Pickups" sits under the rule switches while Items is on. An item square is a small diamond with the item's initial. In Pickups the item bar shows ×count held and the side panel "Held n/3" in place of energy.
+- On their turn an item can be picked, aimed and queued (the button reads "Queue"). The strip says "Next: Cross, E4", then "Firing Cross"; if it can't be paid for at turn start it says "Skipped Cross bomb".
 
 ## UI notes (round 4)
 
@@ -53,7 +60,7 @@ Where the UI differs from UX-SPEC.md, mostly to stay under 44 KB:
 
 ## Logic API for UI
 
-Protocol is now version 4 (CONFIG is 6 bytes, ships are 2 bytes). Full rules are in PLAN.md §5–7.1.
+Protocol is now version 5 (CONFIG is 6 bytes with the Pickups flag in bit 6, ships are 2 bytes). Full rules are in PLAN.md §5–7.1.
 
 **Config** (`game/types.ts`, round 5): `{ russian, turns: 0 one shot | 1 salvo | 2 simultaneous, items, extraShot, noTouch, timer, size: 0 small 8×8 | 1 classic 10×10 | 2 large 12×12 | 3 huge 14×14, seed }`.
 - Use `ctrl.setConfig({ size })`, `ctrl.setConfig({ russian: true })`, and so on. The controller normalises through `normConfig`: Russian forces `size 1` and `noTouch`, and `extraShot` with one-shot turns; Salvo turns force `items` and `extraShot` off.
@@ -76,9 +83,8 @@ Protocol is now version 4 (CONFIG is 6 bytes, ships are 2 bytes). Full rules are
 - UI helpers I changed minimally to compile: `grid.capsule(ship, len, cls)`, `grid.sunk(ship, len, anim)`, `grid.cellsOf(g, ship, i)`, `battle.model(g, board, opts)`.
 - `grid.ts` itself (cells, keyboard nav, `cellAt`, SVG viewBox) is still hard-coded to 10×10. That is enough for Classic, Salvo, Items and Russian, but Small, Large and Huge need it to use `g.n`.
 
-**Airstrike** (`items.AIRSTRIKE = 4`, cost 4, "Hits 5 cells on a diagonal"):
-- `a` is the centre cell, with row and column in 2..n-3. `b` is 0 for `\` and 1 for `/`.
-- `clampAirstrike(g, cell)` gives a valid centre. `battle.ts` already builds it: R rotates it, and the direction labels are "falling" and "rising".
+**Airstrike** (`items.AIRSTRIKE = 4`, round 6: cost 5, a scatter):
+- `a` is any cell, `b` is 0. `footprint` gives the 5×5 area for the preview; `scatter(g, a, shot)` gives the struck cells.
 - `ITEMS` now has 5 entries, and the ids equal the indexes.
 - Area items (Cross, Line, Airstrike) may be aimed at already-hit cells. They are legal unless every footprint cell is already resolved.
 

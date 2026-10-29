@@ -228,7 +228,7 @@ Today the whole lane is shaded like an area item, and the direction is hard to r
 - **Shortcut:** tapping a row label (1–N) aims "From left" along that row, and tapping a column label (A–…) aims "From top" down that column.
 - Result: crossed cells become known water as today, and the hit cell gets the normal hit animation.
 
-### 9.5 Airstrike (new)
+### 9.5 Airstrike (new; superseded in round 6 by a 5×5 scatter, see TODO.md "Round 6 notes")
 *Rules proposal for logic:* cost 4. It hits 5 cells on a diagonal, ↘ (b = 0) or ↙ (b = 1), with `a` = the top end. All 5 cells must be on the board. Island cells are flown over: no effect, and they are not counted. ANSWER covers the untargeted cells. Diagonals cross ships of either orientation (at most one cell per ship), so Airstrike finds ships where Line finishes them.
 - Footprint: the 5 diagonal cells with the standard footprint look.
 - Rotate toggles ↘ and ↙. The aimed cell is the centre of the diagonal, clamped so all 5 fit.

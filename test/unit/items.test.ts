@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampAirstrike, clampLine, clampSonar, footprint, itemParamsValid, torpedoLine } from '../../src/game/items';
+import { clampLine, clampSonar, footprint, itemParamsValid, scatter, torpedoLine } from '../../src/game/items';
 import { geoOf } from '../../src/game/rules';
 import { resolveAttack, resolvedCells } from '../../src/game/resolve';
 import { FLEET_A, FLEET_B, G, cfgOf } from './helpers';
@@ -81,17 +81,30 @@ describe('resolve items', () => {
 });
 
 describe('airstrike', () => {
-  it('hits 5 cells on a diagonal centred on a cell 2 from every edge', () => {
-    expect(footprint(G, 4, 55, 0)).toEqual([33, 44, 55, 66, 77]);
-    expect(footprint(G, 4, 55, 1)).toEqual([37, 46, 55, 64, 73]);
-    expect(itemParamsValid(G, 4, 22, 0)).toBe(true);
-    expect(itemParamsValid(G, 4, 77, 1)).toBe(true);
-    for (const [a, b] of [[21, 0], [12, 0], [78, 1], [87, 0], [55, 2]]) expect(itemParamsValid(G, 4, a!, b!)).toBe(false);
-    expect(clampAirstrike(G, 0)).toBe(22);
-    expect(clampAirstrike(G, 99)).toBe(77);
-    const ans = resolveAttack(G, FLEET_A, new Set([44]), { k: 'item', item: 4, a: 22, b: 0 });
-    // Diagonal 0, 11, 22, 33, 44: FLEET_A has 0 (carrier) and 22 (battleship); 44 already shot.
-    expect(ans).toEqual({ k: 'cells', entries: [{ cell: 0, code: 1 }, { cell: 11, code: 0 }, { cell: 22, code: 1 }, { cell: 33, code: 0 }] });
+  it('aims anywhere; its area is the 5×5 around the square, clipped at the edges', () => {
+    expect(itemParamsValid(G, 4, 0, 0)).toBe(true);
+    expect(itemParamsValid(G, 4, 99, 0)).toBe(true);
+    expect(itemParamsValid(G, 4, 55, 1)).toBe(false);
+    expect(footprint(G, 4, 55, 0)).toHaveLength(25);
+    expect(footprint(G, 4, 0, 0)).toEqual([0, 1, 2, 10, 11, 12, 20, 21, 22]);
+  });
+  it('scatter: the square plus 4 random untargeted ones near it, fixed by seed and board state', () => {
+    const shot = new Set([44, 45]);
+    const s = scatter(G, 55, shot);
+    expect(s).toHaveLength(5);
+    expect(s).toContain(55);
+    expect(s.every((c) => footprint(G, 4, 55, 0).includes(c) && !shot.has(c))).toBe(true);
+    expect(scatter(G, 55, new Set(shot))).toEqual(s);
+    // Another seed or move gives other cells (for most draws).
+    const other = geoOf(cfgOf({ seed: 777 }));
+    const differ = [0, 1, 2, 3, 4, 5].filter((k) => scatter(other, 55, new Set([...shot, ...Array.from({ length: k }, (_, i) => i)])).join() !== s.join());
+    expect(differ.length).toBeGreaterThan(3);
+    // An already-shot square: 5 from the area; a corner with 3 free cells: all of them.
+    expect(scatter(G, 44, shot).includes(44)).toBe(false);
+    expect(scatter(G, 44, shot)).toHaveLength(5);
+    expect(scatter(G, 0, new Set([1, 2, 10, 12, 20, 22]))).toEqual([0, 11, 21]);
+    const ans = resolveAttack(G, FLEET_A, shot, { k: 'item', item: 4, a: 55, b: 0 });
+    expect(ans.k === 'cells' && ans.entries.map((e) => e.cell)).toEqual(s);
   });
 });
 
