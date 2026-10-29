@@ -32,7 +32,7 @@ export class Controller {
   fleet: Fleet;
   /** Salvo selection on the target board. */
   sel: number[] = [];
-  /** Prefire: shots queued during their turn, fired as my turn starts (see prefire). */
+  /** Prefire: shots queued during their turn, in order, fired as my turn starts (see prefire). */
   queue: number[] = [];
   /** Most recent result, for the status strip. */
   lastResult = '';
@@ -361,9 +361,14 @@ export class Controller {
     this.emit();
   }
 
+  /** How many shots prefire may queue: Salvo, the shots I'll have; with extra shot, 3 (later ones fire only after hits); else 1. */
+  prefireMax(m: Match): number {
+    return m.config.mode === 1 ? shotsAllowed(m, 'me') : m.config.extraShot ? 3 : 1;
+  }
+
   /**
-   * Prefire, during their turn: toggle a queued shot. Salvo queues up to the
-   * shots I'll have; other modes queue one normal shot (a new pick replaces it).
+   * Prefire, during their turn: toggle a queued shot (normal shots only). When
+   * the queue is full a new pick is ignored, except that a 1-shot queue swaps.
    * Purely local: nothing is sent until my turn starts.
    */
   prefire(cell: number): void {
@@ -371,17 +376,39 @@ export class Controller {
     if (!m || m.phase !== 'theirTurn' || !(cell >= 0 && cell < m.geo.n ** 2) || m.target.shot.has(cell)) return;
     const q = this.queue;
     const i = q.indexOf(cell);
+    const max = this.prefireMax(m);
     if (i >= 0) q.splice(i, 1);
-    else if (m.config.mode !== 1) this.queue = [cell];
-    else if (q.length < shotsAllowed(m, 'me')) q.push(cell);
+    else if (q.length < max) q.push(cell);
+    else if (max === 1) this.queue = [cell];
     this.emit();
+  }
+
+  /** My turn started with a queue: after 300 ms (the UI says "Firing E4"), fire it. */
+  private firePrefire(m: Match): void {
+    const salvo = m.config.mode === 1;
+    const n = shotsAllowed(m, 'me');
+    // Drop cells fired at meanwhile and shots I no longer have.
+    this.queue = this.queue.filter((c) => !m.target.shot.has(c)).slice(0, salvo ? n : 3);
+    if (salvo && this.queue.length < n) {
+      // Not enough for the salvo: they become the selection.
+      this.sel = this.queue;
+      this.queue = [];
+      return;
+    }
+    if (!this.queue.length) return;
+    this.timer('prefire', 300, () => {
+      if (this.match !== m || m.phase !== 'myTurn') return;
+      const cells = salvo ? this.queue.splice(0) : this.queue.splice(0, 1);
+      this.attack({ k: 'fire', cells }, true);
+    });
   }
   clearPrefire(): void {
     this.queue = [];
     this.emit();
   }
 
-  attack(a: Attack): boolean {
+  /** Take my turn. A move of my own (not `queued`) cancels the rest of the prefire queue. */
+  attack(a: Attack, queued = false): boolean {
     const s = this.state;
     if (s.s !== 'battle' || s.match.phase !== 'myTurn') return false;
     try {
@@ -389,6 +416,8 @@ export class Controller {
     } catch {
       return false;
     }
+    if (!queued) this.queue = [];
+    this.timer('prefire');
     this.sel = [];
     this.timer('turn');
     this.deadline = 0;
@@ -416,15 +445,7 @@ export class Controller {
     this.timer('stall');
     if (doc) doc.title = mine ? 'Your turn · Battleship' : 'Battleship';
     if (mine) this.onSfx('turn');
-    if (mine && this.queue.length) {
-      // Prefire: drop cells that can't be fired at any more and shots I no longer have.
-      const n = shotsAllowed(m, 'me');
-      const q = this.queue.filter((c) => !m.target.shot.has(c)).slice(0, n);
-      this.queue = [];
-      if (q.length === n && this.attack({ k: 'fire', cells: q })) return;
-      // Salvo, not enough queued: they become the selection.
-      if (m.config.mode === 1) this.sel = q;
-    }
+    if (mine) this.firePrefire(m);
     if (!secs) return;
     this.deadline = Date.now() + secs;
     if (mine) this.timer('turn', secs, () => this.autoAct());
@@ -543,6 +564,8 @@ export class Controller {
     if (s.match.phase !== 'awaitingAnswer') return this.cheat('they answered out of turn');
     const r = applyAnswer(s.match, a);
     if ('cheat' in r) return this.cheat(r.cheat);
+    // Prefire: what is left when my turn passes was waiting for hits that didn't come.
+    if ((s.match.phase as Match['phase']) !== 'myTurn') this.queue = [];
     this.fx = { target: s.match.target.last.slice(), own: [] };
     const text = (this.timedOut ? "Time's up. " : '') + this.describe(a, true);
     this.timedOut = false;
@@ -552,7 +575,7 @@ export class Controller {
   // ---------- end of game ----------
 
   private toEnd(match: Match, verdict: 'pending' | 'cheat', reason?: string): void {
-    for (const n of ['turn', 'stall', 'banner']) this.timer(n);
+    for (const n of ['turn', 'stall', 'banner', 'prefire']) this.timer(n);
     this.deadline = 0;
     this.queue = [];
     match.phase = 'over';

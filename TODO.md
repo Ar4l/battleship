@@ -53,10 +53,17 @@ Protocol is now version 3 (CONFIG is 7 bytes, ships are 2 bytes). Full rules are
 
 **Extra shot in Items mode:** any hit by a shot, a torpedo or an area item gives another turn. Sonar never does. An extra turn adds no energy.
 
-**Prefire** (purely local, `Controller`):
-- `ctrl.queue: number[]` holds the queued cells.
-- `ctrl.prefire(cell)` toggles a cell. It only works in phase `'theirTurn'`, and ignores cells that are already shot or are islands. Salvo queues up to `shotsAllowed(m, 'me')` cells. Other modes queue one normal shot, and a new pick replaces the old one.
+**Prefire** (purely local, `Controller`; follows UX-SPEC §8):
+- `ctrl.queue: number[]` holds the queued cells, in order.
+- `ctrl.prefireMax(match)` gives how many cells can be queued: Salvo `shotsAllowed`, otherwise 3 with extra shot on (Russian included), else 1.
+- `ctrl.prefire(cell)` toggles a cell. It only works in phase `'theirTurn'`, and ignores cells that are already shot or are islands. When the queue is full a new pick is ignored, except that a 1-cell queue swaps.
 - `ctrl.clearPrefire()` empties the queue.
-- When my turn starts, the queue drops cells that were fired at and shots I no longer have. It fires if it is complete. Otherwise, in Salvo, the cells become `ctrl.sel`.
-- The queue is cleared on placement and at game end.
-- UI to do: on their turn, route target-board taps to `ctrl.prefire`, show the queued cells, and offer a clear button.
+- When my turn starts, cells already fired at and shots I no longer have are dropped. 300 ms later the queue fires: the whole salvo, or `queue[0]` alone (the next one fires after a hit). So "Firing E4" is `phase === 'myTurn' && queue.length`. A Salvo queue that is too short becomes `ctrl.sel` at once.
+- Leftovers are dropped when my turn passes. Any move of my own (`ctrl.attack`, `fireSalvo`, the timer) cancels the queue.
+- UI to do: on their turn, route target-board taps to `ctrl.prefire`, show the queued cells and a Clear link, and make Esc clear the queue.
+
+**Where this differs from UX-SPEC proposals** (the logic owner's call; none of it changes the UI):
+- Airstrike `a` is the diagonal's *centre*, not its top end, so hovering aims it the same way the Cross does. Use `clampAirstrike`. `b` is 0 for ↘ and 1 for ↙, as the spec says.
+- Sizes: `SIZES` also has Small 8×8 (size 0). Leave it out of the MAP control if you only want 10/12/14.
+- The fleet grows with the board, as TODO asked: 12×12 has 7 ships and 22 cells, 14×14 has 8 ships and 26 cells (PLAN.md §7.1). The ship names come from `geo.names`.
+- Islands: 3 islands on 12×12 and 5 on 14×14, each 2–4 cells (about 6–8% land), kept 1 cell from the edge and 2 cells apart.

@@ -315,7 +315,7 @@ Balance notes for implementers (these are not settings):
 
 **Russian («Морской бой»).** The common rules of the paper game and the popular online versions: 10×10, fleet 1×4, 2×3, 3×2, 4×1 (20 cells), ships can't touch (diagonals included), a hit or sunk shoots again, water around sunk ships is auto-marked. No items, no other sizes (the config is normalised to this).
 
-**Prefire** (local only, no wire change). During the opponent's turn a player can queue their next shot (Salvo: up to their shot count; Classic, Items, Russian: one normal shot). It fires as their turn starts. Cells fired at meanwhile are dropped, and a Salvo queue is cut to the shots they still have; a Salvo queue that is short becomes the selection.
+**Prefire** (local only, no wire change). During the opponent's turn a player can queue normal shots: in Salvo up to their shot count, otherwise 1, or 3 with extra shot on (Russian included). 300 ms into their turn the queue fires: the whole salvo, or the first shot, then the next one after each hit. What is left when the turn passes is dropped, and so is the queue when the player makes a move of their own. Cells fired at meanwhile are dropped, and a Salvo queue is cut to the shots they still have. A Salvo queue that is too short becomes the selection.
 
 **Win.** A player wins by sinking the whole enemy fleet. There are no draws, because play is sequential.
 

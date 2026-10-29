@@ -114,22 +114,57 @@ describe('controller over an in-memory transport', () => {
     expect(H.config.seed === seed && H.config.seed === 0).toBe(false);
   });
 
-  it('prefire: a shot queued during their turn fires as my turn starts', async () => {
+  it('prefire: a shot queued during their turn fires 300 ms into my turn', async () => {
     const { H, G } = await connect({ mode: 2 });
     await placeAndStart(H, G);
     const [me, them] = H.match!.phase === 'theirTurn' ? [H, G] : [G, H];
     them.prefire(50); // not their phase: ignored
     expect(them.queue).toEqual([]);
     me.prefire(55);
-    me.prefire(44); // one shot outside Salvo: replaces
+    me.prefire(44); // one shot without extra shot: a new pick swaps
     expect(me.queue).toEqual([44]);
     me.prefire(44);
     expect(me.queue).toEqual([]);
     me.prefire(66);
     them.attack({ k: 'fire', cells: [98] });
+    await until(() => me.match!.phase === 'myTurn');
+    expect(me.queue).toEqual([66]); // "Firing F7" for 300 ms
     await until(() => me.match!.phase === 'theirTurn' && them.match!.phase === 'myTurn');
     expect(me.match!.target.shot.has(66)).toBe(true);
     expect(me.queue).toEqual([]);
+  });
+
+  it('prefire with extra shot: up to 3, later ones fire only after hits, a move of my own cancels', async () => {
+    const { H, G } = await connect({ mode: 0, extraShot: true });
+    await placeAndStart(H, G);
+    const [me, them] = H.match!.phase === 'theirTurn' ? [H, G] : [G, H];
+    const ships = shipCellsOf(me === H ? FLEET_B : FLEET_A);
+    const water = untargeted(me.match!).filter((c) => !ships.includes(c));
+    // Their shots land on my water, so their turn always passes.
+    const mine = shipCellsOf(me === H ? FLEET_A : FLEET_B);
+    const sea = untargeted(them.match!).filter((c) => !mine.includes(c));
+    for (const c of [ships[0]!, ships[1]!, water[0]!, water[1]!]) me.prefire(c);
+    expect(me.queue).toEqual([ships[0], ships[1], water[0]]);
+    them.attack({ k: 'fire', cells: [sea[0]!] });
+    // hit, hit, miss: all three fire, then the turn passes.
+    await until(() => them.match!.phase === 'myTurn' && me.match!.phase === 'theirTurn', 5000);
+    expect([ships[0]!, ships[1]!, water[0]!].every((c) => me.match!.target.shot.has(c))).toBe(true);
+    // Queue water first: the miss passes the turn and the rest is dropped.
+    me.prefire(water[2]!);
+    me.prefire(ships[2]!);
+    them.attack({ k: 'fire', cells: [sea[1]!] });
+    await until(() => them.match!.phase === 'myTurn' && me.match!.phase === 'theirTurn', 5000);
+    expect(me.match!.target.shot.has(ships[2]!)).toBe(false);
+    expect(me.queue).toEqual([]);
+    // A manual shot inside the 300 ms cancels the queue.
+    me.prefire(ships[3]!);
+    them.attack({ k: 'fire', cells: [sea[2]!] });
+    await until(() => me.match!.phase === 'myTurn');
+    expect(me.attack({ k: 'fire', cells: [water[3]!] })).toBe(true);
+    expect(me.queue).toEqual([]);
+    await until(() => them.match!.phase === 'myTurn' && me.match!.phase === 'theirTurn');
+    await new Promise((r) => setTimeout(r, 350));
+    expect(me.match!.target.shot.has(ships[3]!)).toBe(false);
   });
 
   it('prefire in Salvo: up to my shots; too few become the selection; fired cells are dropped', async () => {
