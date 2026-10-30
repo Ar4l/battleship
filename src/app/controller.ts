@@ -10,6 +10,7 @@ import { PROTO_VERSION, decode, encode, type Msg } from '../proto/codec';
 import type { RoomEvents } from '../net/room';
 import type { Transport } from '../net/transport';
 import type { AppState, NoticeKind } from './state';
+import { load, save, type Game, type Outcome, type Peer, type Stats } from './stats';
 
 export type Sfx = 'miss' | 'hit' | 'sunk' | 'turn';
 
@@ -77,9 +78,43 @@ export class Controller {
   private hiddenAt = 0;
   private shownAt = 0;
   private heard = 0;
+  // Declared only, so no field initialisers ship.
+  /** This device's stats (see stats.ts). */
+  declare me: Stats;
+  /** The opponent on this connection, from their HELLO. */
+  declare peer?: Peer;
+  /** Games on this connection, by winner (set in attach). */
+  declare series: Record<Outcome, number>;
+  /** This game's entry in the stats log, once counted. */
+  declare private logged: Game | null;
 
   constructor(private net: NetDeps = {}) {
     this.fleet = randomFleet(this.geo, this.rng);
+    this.me = load();
+  }
+
+  /** "You 3 – 2 Sam" once a game on this connection has finished (draws count in neither), else ''. */
+  get score(): string {
+    const { me, them, draw } = this.series;
+    return me + them + draw ? `You ${me} – ${them} ${this.peer?.name || 'Friend'}` : '';
+  }
+
+  /**
+   * Count the game being played, once: in the series and in the stats log. The
+   * only second call is a cheat verdict after the end, which turns it into a win.
+   */
+  private tally(o: Outcome, forfeit = 0): void {
+    const g = this.logged;
+    if (g?.[1] === 'me') return;
+    if (g) {
+      this.series[g[1]]--;
+      g[1] = o;
+    } else {
+      const st = this.match!.stats.me;
+      (this.me = load(this.me)).log.push((this.logged = [Date.now(), o, this.peer?.id, this.peer?.name, st.hits, st.shots, forfeit] as Game));
+    }
+    this.series[o]++;
+    save(this.me);
   }
 
   /** Board size, fleet and islands of the current config (placement uses this; a match has its own m.geo). */
@@ -191,7 +226,8 @@ export class Controller {
   }
 
   private hello(): void {
-    this.send({ t: 'hello', ver: PROTO_VERSION, role: this.role === 'host' ? 0 : 1 });
+    // id and name from my stats (encode() reads only those).
+    this.send({ ...this.me, t: 'hello', ver: PROTO_VERSION, role: this.role === 'host' ? 0 : 1 });
   }
 
   /** Channel to the opponent is open. */
@@ -199,6 +235,7 @@ export class Controller {
     this.t = t;
     this.role = role;
     this.gameNo = 0;
+    this.series = { me: 0, them: 0, draw: 0 };
     this.gotHello = this.gotFrame = false;
     t.onmessage = (u8) => this.onFrame(u8);
     t.onclose = () => this.peerGone();
@@ -219,11 +256,14 @@ export class Controller {
   }
 
   notice(kind: NoticeKind, detail?: string): void {
+    // They left mid-battle (detail 'battle'), or stalled and I stopped waiting: a forfeit win.
+    if (kind === 'left' && detail) this.tally('me', 1);
     this.teardown();
     this.set({ s: 'notice', kind, code: this.lastCode || undefined, detail });
   }
 
   leave(): void {
+    if (this.state.s === 'battle') this.tally('them');
     this.send({ t: 'bye' });
     this.teardown();
     this.lastCode = 0;
@@ -241,8 +281,7 @@ export class Controller {
   leaveStalled(): void {
     if (this.state.s !== 'battle') return this.leave();
     this.send({ t: 'bye' });
-    this.teardown();
-    this.set({ s: 'notice', kind: 'left', detail: 'stalled' });
+    this.notice('left', 'stalled');
   }
 
   /**
@@ -306,6 +345,7 @@ export class Controller {
     this.qItem = null;
     this.theirBoard = this.theirCoin = this.theirNonce = null;
     this.sentCoin = this.revealed = false;
+    this.logged = null;
     this.sel = [];
     this.lastResult = '';
     this.gameNo++;
@@ -515,6 +555,7 @@ export class Controller {
         return this.send({ t: 'pong' });
       case 'hello':
         if (m.ver !== PROTO_VERSION) return this.notice('version');
+        this.peer = m;
         // The guest answers every HELLO, so the host hears one even if the guest's own were dropped.
         if (this.role === 'guest') return this.hello();
         if (this.gotHello) return;
@@ -630,6 +671,7 @@ export class Controller {
     this.qItem = null;
     match.phase = 'over';
     if (doc) doc.title = 'Battleship';
+    this.tally(match.winner!);
     this.set({ s: 'end', match, verdict, reason, theirVerdict: null, rematch: { me: false, them: false }, peerLeft: false });
     if (!this.revealed) this.send({ t: 'reveal', salt: this.salt, fleet: this.fleet });
     this.revealed = true;
@@ -669,6 +711,7 @@ export class Controller {
     this.send({ t: 'verdict', ok: v.ok });
     const e = this.state;
     if (e.s !== 'end') return;
+    if (!v.ok) this.tally('me');
     this.set({ ...e, theirFleet: fleet, ...(v.ok ? e.verdict !== 'cheat' && { verdict: 'verified' } : { verdict: 'cheat', reason: v.reason }) });
     this.onAnnounce(v.ok ? 'Fleet verified.' : v.reason);
   }

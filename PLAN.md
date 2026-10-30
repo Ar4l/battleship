@@ -41,6 +41,8 @@ battleship/
     app/
       state.ts             AppState discriminated union (§3)
       controller.ts        the ONLY place joining engine + net + ui; owns the state machine
+      stats.ts             this device's player id, name and game log in localStorage 'bs:stats'
+                           (memory only when storage is blocked); summary.ts sums the log (lazy)
       debug.ts             window.__bs hooks for e2e (own board, force-direct, lie mode),
                            enabled only when localStorage 'bs:debug' === '1'
     game/                  PURE. No DOM, no network. Unit-tested.
@@ -74,6 +76,8 @@ battleship/
       announce.ts          aria-live polite region helper
       sound.ts             WebAudio synth (lazy AudioContext on first gesture), mute persisted
       screens/home.ts lobby.ts direct.ts placement.ts battle.ts end.ts notice.ts
+      screens/stats.ts     the Stats screen, loaded on demand (with styles/stats.css)
+      art.ts               the home illustration, loaded on wide screens only
     styles/
       tokens.css           colours, type, spacing (§9)
       app.css              layout, grid, buttons, animations, reduced-motion
@@ -206,7 +210,7 @@ Each frame is one message. Byte 0 is the opcode. The channel is reliable and ord
 
 | Op | Name | Layout | Bytes | Sender |
 |---|---|---|---|---|
-| 0x01 | HELLO | `01 ver=5 role(0 host,1 guest)` | 3 | both, on channel open |
+| 0x01 | HELLO | `01 ver=6 role(0 host,1 guest)` then UTF-8: player id (8 ASCII chars) and name (≤ 16 chars, may be empty). Decoded at any length ≥ 3, so other versions still read as a version mismatch | 11–59 | both, on channel open |
 | 0x02 | CONFIG | `02 flags(b0 extraShot, b1 noTouch, b2 russian, b3 items, b4-5 turns 0 one shot/1 salvo/2 simultaneous, b6 pickups) timerSec(0/15/30/60) size(0..3) seedHi seedLo` | 6 | host, after HELLO and in REMATCH |
 | 0x03 | READY | `03 boardCommit[32] coinCommit[32]` | 65 | both, on Ready |
 | 0x04 | COIN | `04 nonce[16]` | 17 | both, after having sent READY **and** received the peer's READY (game 1 only) |
@@ -540,13 +544,14 @@ applyAnswer(m, answer): { m, events: UiEvent[] } | { cheat: string }
 
 | Asset | Budget (gzip -9) | Measured |
 |---|---|---|
-| `index.html` with inlined CSS | ≤ 6.0 KB | 5.9 KB |
-| app JS (entry chunk: game + proto + ui + room) | ≤ 24.6 KB | 24.5 KB |
+| `index.html` with inlined CSS | ≤ 6.0 KB | 6.0 KB |
+| app JS (entry chunk: game + proto + ui + room) | ≤ 25.1 KB | 25.0 KB |
 | Trystero chunk (lazy, trimmed) | ≤ 15.3 KB | 15.0 KB |
 | direct-link chunks (lazy: SDP packing, fallback flows and screens) | ≤ 4.5 KB | 4.0 KB |
-| **Code game total (html + entry + Trystero)** | **≤ 45.5 KB hard** | **45.5 KB** |
+| **Code game total (html + entry + Trystero)** | **≤ 46.0 KB hard** | **46.0 KB** |
+| Stats screen (lazy, on opening it) / home illustration (lazy, wide screens only) | – | 1.6 KB / 0.3 KB |
 
-Measured values are approximate (rounded, as of round 6); `npm run size` prints exact ones. Only the total is hard (40 KB until round 4, which raised it to 44 KB for board sizes, islands, Russian mode, Airstrike, prefire and the one-screen mobile battle; round 5 raised it to 44.5 KB for the independent rule settings and simultaneous salvo, about 0.5 KB before trimming and 0.42 KB after; round 6 raised it to 45.5 KB for Pickups, the scattered Airstrike and item prefire, 0.88 KB after trimming its own code); the per-file rows are guard rails with some slack so a small CSS change doesn't fail a deploy while the total still fits. The mobile round moved 0.5 KB of rail from Trystero to the entry: it trimmed Trystero's unused stream and track bookkeeping (0.3 KB) to pay for the wake lock, the background ping and the iOS audio unlock. Mobile round 2 moved another 0.4 KB the same way: Trystero's per-peer track plumbing and public media methods went (0.3 KB) to pay for the relay re-check, the wake-lock idle cap and the in-app browser hint. The round 6 review fixes (hold-full pickup notice, item bar reset after queueing) moved 0.1 KB of unused Trystero rail to the entry; the total budget did not change.
+Measured values are approximate (rounded, as of round 6); `npm run size` prints exact ones. Only the total is hard (40 KB until round 4, which raised it to 44 KB for board sizes, islands, Russian mode, Airstrike, prefire and the one-screen mobile battle; round 5 raised it to 44.5 KB for the independent rule settings and simultaneous salvo, about 0.5 KB before trimming and 0.42 KB after; round 6 raised it to 45.5 KB for Pickups, the scattered Airstrike and item prefire, 0.88 KB after trimming its own code; round 7 raised it to 46.0 KB (45,997 B, +0.51 KB) for stats: the id and name in HELLO, the series score, the name field and the game log, about 0.58 KB, with 0.07 KB paid back by loading the home illustration only on wide screens. The stats are stored as a per-game log so that only appending a game ships in the entry; the lazy Stats screen sums it up); the per-file rows are guard rails with some slack so a small CSS change doesn't fail a deploy while the total still fits. The mobile round moved 0.5 KB of rail from Trystero to the entry: it trimmed Trystero's unused stream and track bookkeeping (0.3 KB) to pay for the wake lock, the background ping and the iOS audio unlock. Mobile round 2 moved another 0.4 KB the same way: Trystero's per-peer track plumbing and public media methods went (0.3 KB) to pay for the relay re-check, the wake-lock idle cap and the in-app browser hint. The round 6 review fixes (hold-full pickup notice, item bar reset after queueing) moved 0.1 KB of unused Trystero rail to the entry; the total budget did not change.
 
 - The first plan (9 KB entry, 37 KB target) underestimated the UI and anti-cheat code. Instead of raising the budget, the Trystero chunk was trimmed from 22.0 KB to 15.6 KB (`build/trystero/`: no media, no public actions, a one-frame JSON wire for internal messages, no room-password challenge), Vite's preload helper was replaced by a pass-through, the CSS was merged and deduplicated, and the game, protocol and UI modules were rewritten more compactly.
 - No fonts, images or audio files. The favicon is an inline SVG data URI.

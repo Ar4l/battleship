@@ -6,6 +6,7 @@ export type VerdictState = 'pending' | 'verified' | 'cheat' | 'unverified';
 
 export type AppState =
   | { s: 'home'; code?: string }
+  | { s: 'stats' }
   | { s: 'lobby-host'; code: number; relaysDown: boolean }
   | { s: 'lobby-guest'; code: number; slow: boolean }
   /** connecting: 1 waiting for the guest, 2 ICE failed once (it may still recover). */

@@ -180,7 +180,8 @@ input {
 .track,
 .item,
 .boxes span,
-.strip {
+.strip,
+.input {
   border: 1px solid var(--fg);
   border-radius: 2px;
 }
@@ -470,6 +471,16 @@ input {
 }
 .home-art {
   display: none;
+}
+.input {
+  height: 48px;
+  padding: 0 12px;
+  background: var(--water);
+  width: 0;
+  flex: 1;
+}
+.me {
+  align-items: center;
 }
 .foot {
   padding-top: 16px;
@@ -1176,6 +1187,12 @@ input {
 @media (max-width: 599px) {
   .meta {
     visibility: hidden;
+  }
+  .scored .meta {
+    visibility: visible;
+  }
+  .scored .brand span {
+    display: none;
   }
   .top {
     height: 44px;

@@ -28,6 +28,7 @@ export function end(ctrl: Controller): Screen {
     const m = s.match;
     target.update(model(m.geo, m.target, { reveal: s.theirFleet }));
     own.update(model(m.geo, m.own, { own: m.fleet }));
+    const score = ctrl.score;
     const key = JSON.stringify([s.verdict, s.reason, s.theirVerdict, s.rematch, s.peerLeft, s.editing, !!s.theirFleet, ctrl.config]);
     if (key === lastKey) return;
     lastKey = key;
@@ -35,6 +36,7 @@ export function end(ctrl: Controller): Screen {
     head.replaceChildren(
       label('Game over'),
       h('h2', { cls: 'h1', id: 'result' }, m.winner === 'me' ? 'You won' : m.winner === 'draw' ? 'Draw' : m.winner ? 'You lost' : 'Game over'),
+      score && h('p', 'mono', score),
       h(
         'p',
         { cls: 'verdict ' + (v === 'verified' ? 'ok' : v), id: 'verdict' },

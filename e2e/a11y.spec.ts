@@ -24,6 +24,10 @@ for (const colorScheme of ['light', 'dark'] as const)
     await playOut(A, B, A);
     await expect(A.locator('#verdict')).toHaveText('Fleet verified');
     await axe(A, 'end');
+    await A.click('#leave');
+    await A.getByRole('button', { name: 'Stats' }).click();
+    await expect(A.locator('#h2h')).toBeVisible();
+    await axe(A, 'stats');
   });
 
 test('keyboard: place a ship and take a turn without a mouse', async ({ browser }) => {

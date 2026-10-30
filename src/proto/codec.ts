@@ -2,11 +2,15 @@ import { decodeFleet, decodeShip, encodeFleet, encodeShip } from '../game/board'
 import { decodeConfig, encodeConfig } from '../game/rules';
 import type { Config, Entry, Fleet, ItemId } from '../game/types';
 
-/** 5: airstrike scatter, item pickups (config flag bit 6). 4: independent fleet, turns and items settings; simultaneous salvo. */
-export const PROTO_VERSION = 5;
+/**
+ * 6: HELLO carries the player id and name. 5: airstrike scatter, item pickups (config flag bit 6).
+ * 4: independent fleet, turns and items settings; simultaneous salvo.
+ */
+export const PROTO_VERSION = 6;
 
 export type Msg =
-  | { t: 'hello'; ver: number; role: 0 | 1 }
+  /** Then, as UTF-8: the player id (8 ASCII characters, '' if absent) and name (cut to 16 UTF-16 units). */
+  | { t: 'hello'; ver: number; role: 0 | 1; id: string; name: string }
   | { t: 'config'; config: Config }
   | { t: 'ready'; board: Uint8Array; coin: Uint8Array }
   | { t: 'coin'; nonce: Uint8Array }
@@ -26,7 +30,7 @@ const OP = { hello: 1, config: 2, ready: 3, coin: 4, fire: 16, answer: 17, use: 
 
 export function encode(m: Msg): Uint8Array {
   const body: ArrayLike<number>[] =
-    m.t === 'hello' ? [[m.ver, m.role]]
+    m.t === 'hello' ? [[m.ver, m.role], new TextEncoder().encode(m.id + m.name)]
     : m.t === 'config' || m.t === 'rematch' ? (m.config ? [encodeConfig(m.config)] : [])
     : m.t === 'ready' ? [m.board, m.coin]
     : m.t === 'coin' ? [m.nonce]
@@ -46,8 +50,11 @@ export function decode(u: Uint8Array): Msg | null {
   const [op, a = 0, b = 0, c = 0] = u;
   const config = decodeConfig(u.subarray(1));
   switch (op) {
-    case OP.hello:
-      return n === 3 && b < 2 ? { t: 'hello', ver: a, role: b as 0 | 1 } : null;
+    case OP.hello: {
+      // Any length from 3 up, so a HELLO from an older or newer version still shows its version.
+      const s = new TextDecoder().decode(u.subarray(3));
+      return n > 2 && b < 2 ? { t: 'hello', ver: a, role: b as 0 | 1, id: s.slice(0, 8), name: s.slice(8, 24) } : null;
+    }
     case OP.config:
       return config && { t: 'config', config };
     case OP.ready:

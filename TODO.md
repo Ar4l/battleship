@@ -34,6 +34,25 @@ Tick items (`[x]`) when done and verified. Owner in brackets.
 - [x] New item source "Pickups": item squares appear on the target board; shooting one gives you an item (inventory instead of energy) [logic + ui]
 - [x] Prefire in Items mode: queue an item (aimed) during their turn; it fires first at turn start, skipped with a note if unaffordable [logic + ui]
 
+## Round 7: stats
+- [x] Series score for the current connection ("You 3 – 2 Sam") on the end screen and in the header during placement and battle [logic + ui]
+- [x] Player id (6 random bytes, base64) and optional name ("Your name" on home, ≤ 16 chars) sent in HELLO; protocol version 6 [logic + ui]
+- [x] Head-to-head record per friend, keyed by their id, with their latest name [logic]
+- [x] Stats screen from home: games, wins, losses, draws, win rate, current and best streak, average accuracy, head to head (name, W–L–D, last played), Reset stats with a confirm; loaded on demand [ui]
+- [x] Rules: a cheat verdict counts as a win for the honest side (a loss turns into a win when their fleet fails verification); an opponent leaving mid-battle is a forfeit win; draws are draws; each game counted once, rematches included [logic]
+- [x] Storage blocked (private mode): stats live in memory for the session, nothing throws [logic]
+- [x] Unit tests (log, summary, storage blocked, HELLO, controller), e2e (series after a game and a rematch on both sides, Stats totals and reset, axe on Stats) [tests]
+
+## Round 7 notes
+
+- Stored as one log entry per finished game (`[time, winner, their id, their name, my hits, my shots, forfeit]` in `localStorage['bs:stats']`, about 45 bytes a game) rather than running totals. Appending is all every game has to load; the totals, streaks and per-friend records are summed by the lazy Stats screen (`app/summary.ts`). Head to head groups by id and shows the latest name. The log is not capped.
+- Leaving a battle yourself counts as a loss (the opponent gets the forfeit win), so quitting can't dodge one. Losing the link while in the background ("away") counts as nothing on that side, which can't tell who dropped.
+- Draws show on the Stats screen; the series line counts wins only ("You 1 – 1 Sam" after a win, a loss and a draw).
+- In placement and battle the series score leads the header's rules line; on phones, where that line is hidden, it takes the place of the wordmark.
+- Accuracy is the mean of each game's hit rate, over games where I fired.
+- A v5 client meeting a v6 one: the v6 side shows "different version"; the v5 side rejects the longer HELLO and sees the opponent leave. HELLO now decodes at any length, so later versions will show the version notice on both sides.
+- The home illustration is loaded only on screens 900 px wide or more (0.07 KB off the entry; phones never fetch it). The session is at 45,997 of 46,000 B: the next feature needs to trim first.
+
 ## Round 6 notes
 
 - Costs are now Sonar 3, Torpedo 4, Cross 4, Line 4, Airstrike 5 (simulation and sources in PLAN.md §7).
@@ -60,7 +79,7 @@ Where the UI differs from UX-SPEC.md, mostly to stay under 44 KB:
 
 ## Logic API for UI
 
-Protocol is now version 5 (CONFIG is 6 bytes with the Pickups flag in bit 6, ships are 2 bytes). Full rules are in PLAN.md §5–7.1.
+Protocol is now version 6 (HELLO carries the player id and name; CONFIG is 6 bytes with the Pickups flag in bit 6, ships are 2 bytes). Full rules are in PLAN.md §5–7.1.
 
 **Config** (`game/types.ts`, round 5): `{ russian, turns: 0 one shot | 1 salvo | 2 simultaneous, items, extraShot, noTouch, timer, size: 0 small 8×8 | 1 classic 10×10 | 2 large 12×12 | 3 huge 14×14, seed }`.
 - Use `ctrl.setConfig({ size })`, `ctrl.setConfig({ russian: true })`, and so on. The controller normalises through `normConfig`: Russian forces `size 1` and `noTouch`, and `extraShot` with one-shot turns; Salvo turns force `items` and `extraShot` off.

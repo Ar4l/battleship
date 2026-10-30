@@ -8,6 +8,9 @@ import { shotsAllowed, untargeted } from '../../src/game/engine';
 import type { Config, Fleet } from '../../src/game/types';
 import { FLEET_A, FLEET_B, G as G10, cfgOf } from './helpers';
 
+// No storage, as in a private window: each controller keeps its stats in memory (and Node 26 stays quiet).
+vi.stubGlobal('localStorage', undefined);
+
 const until = async (f: () => boolean, ms = 3000) => {
   const t0 = Date.now();
   while (!f()) {
@@ -554,5 +557,66 @@ describe('controller over an in-memory transport', () => {
       tr(H).onstate!(true);
       expect(seen).toEqual([true, false]);
     });
+  });
+});
+
+describe('stats: series score and the game log', () => {
+  const named = async (a: string, b: string) => {
+    const H = new Controller();
+    const G = new Controller();
+    H.me.name = a;
+    G.me.name = b;
+    const [x, y] = memoryPair();
+    H.attach(x, 'host');
+    G.attach(y, 'guest');
+    await until(() => H.state.s === 'placement' && G.state.s === 'placement');
+    return { H, G };
+  };
+
+  it('exchanges ids and names in HELLO; counts each game once, rematches included', async () => {
+    const { H, G } = await named('Ann', 'Bob');
+    expect(H.peer).toMatchObject({ id: G.me.id, name: 'Bob' });
+    expect(G.peer).toMatchObject({ id: H.me.id, name: 'Ann' });
+    expect(H.score).toBe('');
+    await placeAndStart(H, G);
+    await playOut(H, G);
+    expect(H.score).toBe('You 1 – 0 Bob');
+    expect(G.score).toBe('You 0 – 1 Ann');
+    expect(H.me.log).toEqual([[expect.any(Number), 'me', G.me.id, 'Bob', 17, expect.any(Number), 0]]);
+    expect(G.me.log).toEqual([[expect.any(Number), 'them', H.me.id, 'Ann', 0, expect.any(Number), 0]]);
+    H.rematch();
+    G.rematch();
+    await until(() => H.state.s === 'placement' && G.state.s === 'placement');
+    await placeAndStart(H, G);
+    await playOut(H, G);
+    expect(H.score).toBe('You 2 – 0 Bob');
+    // Leaving the end screen adds nothing.
+    G.leave();
+    await until(() => H.state.s === 'end' && H.state.peerLeft);
+    expect(H.me.log.map((g) => g[1])).toEqual(['me', 'me']);
+    expect(G.me.log.map((g) => g[1])).toEqual(['them', 'them']);
+  });
+
+  it('an opponent leaving mid-battle is a forfeit win here and a loss there', async () => {
+    const { H, G } = await named('', '');
+    await placeAndStart(H, G);
+    G.leave();
+    await until(() => H.state.s === 'notice');
+    expect(H.me.log).toEqual([[expect.any(Number), 'me', G.me.id, '', 0, 0, 1]]);
+    expect(G.me.log.map((g) => g[1])).toEqual(['them']);
+  });
+
+  it('a fleet that fails verification turns my loss into a win', async () => {
+    const { H, G } = await named('', '');
+    await placeAndStart(H, G);
+    // H wins, then reveals a fleet other than the one it committed to.
+    const c = H as unknown as { send(m: Msg): void };
+    const send = c.send.bind(H);
+    c.send = (m) => send(m.t === 'reveal' ? { ...m, fleet: FLEET_B } : m);
+    await playOut(H, G, false);
+    await until(() => G.state.s === 'end' && G.state.verdict === 'cheat');
+    expect(G.me.log.map((g) => g[1])).toEqual(['me']);
+    expect(G.score).toBe('You 1 – 0 Friend');
+    expect(H.me.log.map((g) => g[1])).toEqual(['me']);
   });
 });

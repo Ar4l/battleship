@@ -11,7 +11,7 @@ const step = (n: number, title: string, ...body: unknown[]) =>
 const head = (title: string) => [label('Direct link'), h('h2', 'h2', title)];
 const share = (url: string, id: string) => [linkBox(prettyUrl(url), id + '-link'), h('div', 'row-btns', copyBtn(() => url, 'Copy link', 'copy-' + id), shareBtn(() => url))];
 
-export function directHost(ctrl: Controller): Screen {
+function directHost(ctrl: Controller): Screen {
   const el = h('section', 'screen narrow', ...head('Preparing link…'));
   const paste = h('input', { id: 'paste', cls: 'mono input', placeholder: 'Paste reply', autocomplete: 'off', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', 'aria-label': 'Reply link or code' });
   const err = h('p', { cls: 'small error', role: 'alert' });
@@ -46,7 +46,7 @@ export function directHost(ctrl: Controller): Screen {
   return { el, update };
 }
 
-export function directGuest(ctrl: Controller): Screen {
+function directGuest(ctrl: Controller): Screen {
   const el = h('section', 'screen narrow', ...head('Preparing reply…'));
   let built = false;
   const update = () => {
@@ -69,7 +69,7 @@ export function directGuest(ctrl: Controller): Screen {
   return { el, update };
 }
 
-export function forwarded(ctrl: Controller): Screen {
+function forwarded(ctrl: Controller): Screen {
   const s = ctrl.state as Extract<typeof ctrl.state, { s: 'forwarded' }>;
   return {
     el: h(
@@ -82,3 +82,5 @@ export function forwarded(ctrl: Controller): Screen {
     ),
   };
 }
+
+export { directHost as 'direct-host', directGuest as 'direct-guest', forwarded };

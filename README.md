@@ -7,6 +7,7 @@ Two-player Battleship that runs peer-to-peer in the browser. There is no server:
 - **Create game** gives a 4-digit code and a link (`aral.cc/battleship/#4821`). Your friend opens the link or types the code.
 - If matchmaking can't connect, use **Use a direct link**: send the link, your friend sends a reply link back, paste it, connect.
 - Rules are independent settings. **Fleet:** Standard or **Russian** (Морской бой: 1×4, 2×3, 3×2, 4×1 on 10×10, no touching; a hit shoots again with one-shot turns). **Turns:** One shot, **Salvo** (one shot per ship you have left, at most 5) or **Simultaneous** salvo (both players pick at once; a round where both fleets sink is a draw). **Items** (one-shot turns only): Sonar, Torpedo, Cross bomb, Line strike and a scattering Airstrike, paid with energy or collected from item squares on the board (Pickups); an item can be queued during the opponent's turn. Board sizes 8×8 to 14×14; Large and Huge have islands. Options: extra shot after a hit, ships can't touch, turn timer. Prefire: queue up to 5 shots during the opponent's turn; they fire in order on your turns.
+- **Stats** (a link on home) are kept on each device only: games, wins, losses, draws, win rate, streaks, accuracy and a head-to-head record per friend. Each device has a random player id and an optional name (“Your name” on home), sent once when the game connects. A rematch shows the series score (“You 3 – 2 Sam”).
 - Fair play: each player commits to `SHA-256(salt, fleet, rules)` before the game and reveals at the end. Every answer the opponent gave is replayed against the revealed fleet; a lie is reported with the cell it happened on.
 
 ## Develop
@@ -30,7 +31,7 @@ The Trystero e2e spec (`@net`) skips itself when no WebTorrent tracker is reacha
 - `src/game/` rules, items, engine, commit-reveal and verification. Pure, no DOM.
 - `src/proto/` binary wire codec (a shot is 2 bytes) and SDP packing for direct links.
 - `src/net/` Trystero room with a room lock, the direct-link fallback and tab forwarding.
-- `src/app/controller.ts` the state machine joining game, network and UI.
+- `src/app/controller.ts` the state machine joining game, network and UI. `src/app/stats.ts` the stats log in `localStorage`.
 - `src/ui/` vanilla DOM screens, the board component, WebAudio sound.
 
 ## Networking choice

@@ -6,7 +6,9 @@ const bytes = (n: number, v = 7) => new Uint8Array(n).fill(v);
 
 describe('codec', () => {
   const msgs: [Msg, number][] = [
-    [{ t: 'hello', ver: 1, role: 1 }, 3],
+    [{ t: 'hello', ver: 1, role: 1, id: '', name: '' }, 3],
+    [{ t: 'hello', ver: 6, role: 0, id: 'Ab+/9xYz', name: '' }, 11],
+    [{ t: 'hello', ver: 6, role: 1, id: 'Ab+/9xYz', name: 'Zoë' }, 15],
     [{ t: 'config', config: cfgOf({ items: true, noTouch: true, timer: 30, size: 3, seed: 4321 }) }, 6],
     [{ t: 'ready', board: bytes(32, 1), coin: bytes(32, 2) }, 65],
     [{ t: 'coin', nonce: bytes(16) }, 17],
@@ -35,12 +37,17 @@ describe('codec', () => {
     expect(u.length).toBe(len);
     expect(decode(u)).toEqual(m);
   });
+  it('HELLO: an older 3-byte one still shows its version; a long name is cut to 16', () => {
+    expect(decode(Uint8Array.from([1, 5, 0]))).toEqual({ t: 'hello', ver: 5, role: 0, id: '', name: '' });
+    expect(decode(encode({ t: 'hello', ver: 6, role: 0, id: 'Ab+/9xYz', name: 'x'.repeat(40) }))).toMatchObject({ name: 'x'.repeat(16) });
+  });
   it('rejects malformed frames', () => {
     const bad = [
       [],
       [0x99],
       [0x01, 1],
       [0x01, 1, 2],
+      [0x01, 6, 2, 65, 66],
       [0x02, 48, 0, 1, 0, 0],
       [0x02, 0, 0, 1, 0, 0, 0],
       [0x02, 0, 0, 0],

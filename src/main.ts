@@ -52,8 +52,8 @@ let idle = false;
 let idleTimer = 0;
 const wake = () => {
   const s = ctrl.state;
-  // Not on home, notice or forwarded.
-  const on = !document.hidden && (s.s === 'end' ? !s.peerLeft : !/^[hnf]/.test(s.s)) && !(idle && s.s !== 'placement' && s.s !== 'battle');
+  // Not on home, notice, forwarded or stats.
+  const on = !document.hidden && (s.s === 'end' ? !s.peerLeft : !/^[hnfs]/.test(s.s)) && !(idle && s.s !== 'placement' && s.s !== 'battle');
   if (on && !lock) {
     // The system may drop the lock (battery saver) or refuse it: ask again on the next event.
     const drop = () => void (lock === p && (lock = undefined));
